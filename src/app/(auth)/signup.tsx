@@ -30,24 +30,33 @@ export default function SignupScreen() {
     const cleanEmail = email.trim();
 
     if (!cleanEmail || !password || !confirmPassword) {
-      setErrorMessage('Email, password aur confirm password enter karo.');
+      setErrorMessage(
+        'Email, password aur confirm password enter karo.',
+      );
       return;
     }
 
     if (password.length < 6) {
-      setErrorMessage('Password kam se kam 6 characters ka hona chahiye.');
+      setErrorMessage(
+        'Password kam se kam 6 characters ka hona chahiye.',
+      );
       return;
     }
 
     if (password !== confirmPassword) {
-      setErrorMessage('Dono passwords same hone chahiye.');
+      setErrorMessage(
+        'Dono passwords same hone chahiye.',
+      );
       return;
     }
 
     setLoading(true);
     setMessage('Creating your DareMe account...');
 
-    console.log('[DareMe Auth] Signup started:', cleanEmail);
+    console.log(
+      '[DareMe Auth] Signup started:',
+      cleanEmail,
+    );
 
     try {
       const { data, error } = await supabase.auth.signUp({
@@ -62,7 +71,11 @@ export default function SignupScreen() {
       });
 
       if (error) {
-        console.error('[DareMe Auth] Signup error:', error);
+        console.error(
+          '[DareMe Auth] Signup error:',
+          error,
+        );
+
         setLoading(false);
         setMessage('');
         setErrorMessage(error.message);
@@ -72,10 +85,12 @@ export default function SignupScreen() {
       setLoading(false);
 
       if (data.session) {
-        setMessage('Account created successfully. Opening DareMe...');
+        setMessage(
+          'Account created successfully. Setting up your profile...',
+        );
 
         setTimeout(() => {
-          router.replace('/(tabs)');
+          router.replace('/(onboarding)/identity');
         }, 500);
 
         return;
@@ -85,7 +100,10 @@ export default function SignupScreen() {
         'Account created. Check your email and confirm your account before login.',
       );
     } catch (error) {
-      console.error('[DareMe Auth] Unexpected signup error:', error);
+      console.error(
+        '[DareMe Auth] Unexpected signup error:',
+        error,
+      );
 
       setLoading(false);
       setMessage('');
@@ -101,12 +119,18 @@ export default function SignupScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={
+        Platform.OS === 'ios'
+          ? 'padding'
+          : undefined
+      }
     >
       <View style={styles.content}>
         <Text style={styles.logo}>DAREME</Text>
 
-        <Text style={styles.title}>Create account.</Text>
+        <Text style={styles.title}>
+          Create account.
+        </Text>
 
         <Text style={styles.subtitle}>
           Join DareMe, take dares and make memories.
@@ -138,10 +162,16 @@ export default function SignupScreen() {
             />
 
             <Pressable
-              onPress={() => setShowPassword((current) => !current)}
+              onPress={() =>
+                setShowPassword(
+                  (current) => !current,
+                )
+              }
               style={styles.eyeButton}
               accessibilityLabel={
-                showPassword ? 'Hide password' : 'Show password'
+                showPassword
+                  ? 'Hide password'
+                  : 'Show password'
               }
               disabled={loading}
             >
@@ -158,14 +188,18 @@ export default function SignupScreen() {
               placeholderTextColor="#77777F"
               value={confirmPassword}
               onChangeText={setConfirmPassword}
-              secureTextEntry={!showConfirmPassword}
+              secureTextEntry={
+                !showConfirmPassword
+              }
               autoCapitalize="none"
               editable={!loading}
             />
 
             <Pressable
               onPress={() =>
-                setShowConfirmPassword((current) => !current)
+                setShowConfirmPassword(
+                  (current) => !current,
+                )
               }
               style={styles.eyeButton}
               accessibilityLabel={
@@ -176,20 +210,26 @@ export default function SignupScreen() {
               disabled={loading}
             >
               <Text style={styles.eyeIcon}>
-                {showConfirmPassword ? '🙈' : '👁️'}
+                {showConfirmPassword
+                  ? '🙈'
+                  : '👁️'}
               </Text>
             </Pressable>
           </View>
 
           {errorMessage ? (
             <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{errorMessage}</Text>
+              <Text style={styles.errorText}>
+                {errorMessage}
+              </Text>
             </View>
           ) : null}
 
           {message ? (
             <View style={styles.messageBox}>
-              <Text style={styles.messageText}>{message}</Text>
+              <Text style={styles.messageText}>
+                {message}
+              </Text>
             </View>
           ) : null}
 
@@ -205,18 +245,24 @@ export default function SignupScreen() {
             {loading ? (
               <ActivityIndicator color="#0B0B0D" />
             ) : (
-              <Text style={styles.buttonText}>⚡ CREATE ACCOUNT</Text>
+              <Text style={styles.buttonText}>
+                ⚡ CREATE ACCOUNT
+              </Text>
             )}
           </Pressable>
 
           <Pressable
-            onPress={() => router.replace('./login')}
+            onPress={() =>
+              router.replace('./login')
+            }
             style={styles.linkButton}
             disabled={loading}
           >
             <Text style={styles.linkText}>
               Already have an account?{' '}
-              <Text style={styles.linkAccent}>Login</Text>
+              <Text style={styles.linkAccent}>
+                Login
+              </Text>
             </Text>
           </Pressable>
         </View>

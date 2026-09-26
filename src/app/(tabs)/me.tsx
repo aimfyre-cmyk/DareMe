@@ -1,37 +1,109 @@
 import { router } from 'expo-router';
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { Avatar } from '../../components/Avatar';
 import { EmptyState } from '../../components/EmptyState';
 import { IconButton } from '../../components/IconButton';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
-import { colors, fontFamily, fontSize, radius, spacing } from '../../constants/theme';
-import { signOut } from '../../lib/auth';
+import {
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
+} from '../../constants/theme';
+import { getProfile } from '../../features/onboarding/profileService';
+import { getCurrentSession, signOut } from '../../lib/auth';
 
-/**
- * ME — Phase 2 shell + Phase 3 authentication logout.
- * Profile/gamification data remains placeholder until later phases.
- */
+type Profile = {
+  username: string;
+  display_name: string;
+  avatar_url: string | null;
+  xp_total: number;
+  level: number;
+  streak_count: number;
+};
+
 export default function MeScreen() {
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [logoutError, setLogoutError] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  const loadProfile = async () => {
+    setLoading(true);
+    setErrorMessage('');
+
+    try {
+      const session = await getCurrentSession();
+
+      if (!session) {
+        router.replace('/(auth)/login' as any);
+        return;
+      }
+
+      const data = await getProfile(session.user.id);
+
+      if (!data) {
+        setErrorMessage('Profile not found.');
+        return;
+      }
+
+      setProfile({
+        username: data.username,
+        display_name: data.display_name,
+        avatar_url: data.avatar_url ?? null,
+        xp_total: data.xp_total ?? 0,
+        level: data.level ?? 1,
+        streak_count: data.streak_count ?? 0,
+      });
+    } catch (error) {
+      console.error(
+        '[DareMe Profile] Failed to load profile:',
+        error,
+      );
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Could not load your profile.',
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogout = async () => {
     if (loggingOut) return;
 
     setLoggingOut(true);
-    setLogoutError('');
+    setErrorMessage('');
 
     try {
       await signOut();
       router.replace('/(auth)/login' as any);
     } catch (error) {
-      console.error('[DareMe Auth] Logout error:', error);
+      console.error(
+        '[DareMe Auth] Logout error:',
+        error,
+      );
 
       setLoggingOut(false);
-      setLogoutError(
+
+      setErrorMessage(
         error instanceof Error
           ? error.message
           : 'Logout failed. Please try again.',
@@ -39,15 +111,47 @@ export default function MeScreen() {
     }
   };
 
+  if (loading) {
+    return (
+      <Screen>
+        <View style={styles.loading}>
+          <ActivityIndicator
+            size="large"
+            color={colors.accent}
+          />
+
+          <Text style={styles.loadingText}>
+            Loading profile...
+          </Text>
+        </View>
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <View style={styles.headerRow}>
         <View style={styles.identity}>
-          <Avatar size={64} />
+          {profile?.avatar_url ? (
+            <Image
+              source={{ uri: profile.avatar_url }}
+              style={styles.profileAvatar}
+              resizeMode="cover"
+            />
+          ) : (
+            <Avatar size={64} />
+          )}
 
           <View>
-            <Text style={styles.username}>Your name</Text>
-            <Text style={styles.handle}>@username</Text>
+            <Text style={styles.username}>
+              {profile?.display_name || 'Your name'}
+            </Text>
+
+            <Text style={styles.handle}>
+              {profile?.username
+                ? `@${profile.username}`
+                : '@username'}
+            </Text>
           </View>
         </View>
 
@@ -55,18 +159,45 @@ export default function MeScreen() {
           accessibilityLabel="Open settings"
           variant="surface"
           onPress={() => {
-            // Phase 4+: navigate to Settings
+            // Settings will be added in a later phase.
           }}
         >
-          <Text style={styles.settingsIcon}>⚙</Text>
+          <Text style={styles.settingsIcon}>
+            ⚙
+          </Text>
         </IconButton>
       </View>
 
       <View style={styles.statRow}>
-        <Stat label="Level" value="—" />
-        <Stat label="XP" value="—" />
-        <Stat label="Streak" value="—" />
+        <Stat
+          label="Level"
+          value={String(profile?.level ?? 1)}
+        />
+
+        <Stat
+          label="XP"
+          value={String(profile?.xp_total ?? 0)}
+        />
+
+        <Stat
+          label="Streak"
+          value={String(profile?.streak_count ?? 0)}
+        />
       </View>
+
+      {errorMessage ? (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>
+            {errorMessage}
+          </Text>
+
+          <Pressable onPress={loadProfile}>
+            <Text style={styles.retryText}>
+              TRY AGAIN
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <SectionHeader title="Badges" />
 
@@ -82,12 +213,6 @@ export default function MeScreen() {
         description="Your finished dares will show up here."
       />
 
-      {logoutError ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{logoutError}</Text>
-        </View>
-      ) : null}
-
       <Pressable
         style={({ pressed }) => [
           styles.logoutButton,
@@ -98,25 +223,53 @@ export default function MeScreen() {
         disabled={loggingOut}
       >
         {loggingOut ? (
-          <ActivityIndicator color="#FFFFFF" />
+          <ActivityIndicator
+            color={colors.primaryText}
+          />
         ) : (
-          <Text style={styles.logoutText}>LOG OUT</Text>
+          <Text style={styles.logoutText}>
+            LOG OUT
+          </Text>
         )}
       </Pressable>
     </Screen>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
   return (
     <View style={styles.stat}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
+      <Text style={styles.statValue}>
+        {value}
+      </Text>
+
+      <Text style={styles.statLabel}>
+        {label}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+
+  loadingText: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.sm,
+  },
+
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -128,6 +281,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
+  },
+
+  profileAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surfaceElevated,
   },
 
   username: {
@@ -164,16 +324,39 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xl,
   },
 
-  settingsIcon: {
-    color: colors.primaryText,
-    fontSize: 20,
-  },
-
   statLabel: {
     color: colors.secondaryText,
     fontFamily: fontFamily.body,
     fontSize: fontSize.xs,
     textTransform: 'uppercase',
+  },
+
+  settingsIcon: {
+    color: colors.primaryText,
+    fontSize: 20,
+  },
+
+  errorBox: {
+    marginTop: spacing.lg,
+    backgroundColor: '#2A1518',
+    borderWidth: 1,
+    borderColor: colors.danger,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+
+  errorText: {
+    color: '#FF7A84',
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.sm,
+  },
+
+  retryText: {
+    color: colors.accent,
+    fontFamily: fontFamily.headingBold,
+    fontSize: fontSize.xs,
   },
 
   logoutButton: {
@@ -199,22 +382,6 @@ const styles = StyleSheet.create({
   logoutText: {
     color: colors.primaryText,
     fontFamily: fontFamily.headingBold,
-    fontSize: fontSize.sm,
-  },
-
-  errorBox: {
-    marginTop: spacing.lg,
-    backgroundColor: '#2A1518',
-    borderWidth: 1,
-    borderColor: '#FF4D5A',
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-
-  errorText: {
-    color: '#FF7A84',
-    fontFamily: fontFamily.body,
     fontSize: fontSize.sm,
   },
 });
