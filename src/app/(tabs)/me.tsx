@@ -23,6 +23,7 @@ import {
 } from '../../constants/theme';
 import { getProfile } from '../../features/onboarding/profileService';
 import { getCurrentSession, signOut } from '../../lib/auth';
+import { transitionDare } from '../../lib/dareTransitions';
 
 type Profile = {
   username: string;
@@ -33,11 +34,22 @@ type Profile = {
   streak_count: number;
 };
 
+type TestState =
+  | 'idle'
+  | 'testing'
+  | 'success'
+  | 'error';
+
+const TEST_PARTICIPANT_ID =
+  '063dccd4-e4b9-45a4-8389-06e7138506b4';
+
 export default function MeScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [testingDare, setTestingDare] =
+    useState<TestState>('idle');
 
   useEffect(() => {
     loadProfile();
@@ -94,6 +106,7 @@ export default function MeScreen() {
 
     try {
       await signOut();
+
       router.replace('/(auth)/login' as any);
     } catch (error) {
       console.error(
@@ -107,6 +120,63 @@ export default function MeScreen() {
         error instanceof Error
           ? error.message
           : 'Logout failed. Please try again.',
+      );
+    }
+  };
+
+  /**
+   * TEMPORARY PHASE 6 QA TEST
+   *
+   * Current test participant:
+   * ACCEPTED
+   *
+   * Expected transition:
+   * ACCEPTED → IN_PROGRESS
+   *
+   * This verifies:
+   * Expo client
+   * → authenticated Supabase session
+   * → Edge Function
+   * → backend wrapper
+   * → state machine
+   * → database
+   *
+   * Remove this test UI after Phase 6 verification.
+   */
+  const handleTestDareTransition = async () => {
+    if (testingDare === 'testing') return;
+
+    setTestingDare('testing');
+    setErrorMessage('');
+
+    try {
+      const result = await transitionDare(
+        TEST_PARTICIPANT_ID,
+        'complete',
+      );
+
+      console.log(
+        '[DareMe] Edge Function test result:',
+        result,
+      );
+
+      setTestingDare('success');
+
+      setErrorMessage(
+        `Dare transition successful: ${result.state}`,
+      );
+    } catch (error) {
+      console.error(
+        '[DareMe] Edge Function test failed:',
+        error,
+      );
+
+      setTestingDare('error');
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Dare transition test failed.',
       );
     }
   };
@@ -186,16 +256,32 @@ export default function MeScreen() {
       </View>
 
       {errorMessage ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>
+        <View
+          style={[
+            styles.messageBox,
+            testingDare === 'success'
+              ? styles.successBox
+              : styles.errorBox,
+          ]}
+        >
+          <Text
+            style={[
+              styles.messageText,
+              testingDare === 'success'
+                ? styles.successText
+                : styles.errorText,
+            ]}
+          >
             {errorMessage}
           </Text>
 
-          <Pressable onPress={loadProfile}>
-            <Text style={styles.retryText}>
-              TRY AGAIN
-            </Text>
-          </Pressable>
+          {testingDare !== 'success' ? (
+            <Pressable onPress={loadProfile}>
+              <Text style={styles.retryText}>
+                TRY AGAIN
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -212,6 +298,28 @@ export default function MeScreen() {
         title="No completed dares yet"
         description="Your finished dares will show up here."
       />
+
+      {/* TEMPORARY PHASE 6 QA BUTTON */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.testButton,
+          pressed && styles.testButtonPressed,
+          testingDare === 'testing' &&
+            styles.testButtonDisabled,
+        ]}
+        onPress={handleTestDareTransition}
+        disabled={testingDare === 'testing'}
+      >
+        {testingDare === 'testing' ? (
+          <ActivityIndicator
+            color={colors.accent}
+          />
+        ) : (
+          <Text style={styles.testButtonText}>
+            TEST DARE ENGINE
+          </Text>
+        )}
+      </Pressable>
 
       <Pressable
         style={({ pressed }) => [
@@ -336,27 +444,67 @@ const styles = StyleSheet.create({
     fontSize: 20,
   },
 
-  errorBox: {
+  messageBox: {
     marginTop: spacing.lg,
-    backgroundColor: '#2A1518',
-    borderWidth: 1,
-    borderColor: colors.danger,
     borderRadius: radius.md,
+    borderWidth: 1,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     gap: spacing.sm,
   },
 
-  errorText: {
-    color: '#FF7A84',
+  errorBox: {
+    backgroundColor: '#2A1518',
+    borderColor: colors.danger,
+  },
+
+  successBox: {
+    backgroundColor: '#12251A',
+    borderColor: colors.success,
+  },
+
+  messageText: {
     fontFamily: fontFamily.body,
     fontSize: fontSize.sm,
+  },
+
+  errorText: {
+    color: '#FF7A84',
+  },
+
+  successText: {
+    color: colors.success,
   },
 
   retryText: {
     color: colors.accent,
     fontFamily: fontFamily.headingBold,
     fontSize: fontSize.xs,
+  },
+
+  testButton: {
+    minHeight: 52,
+    marginTop: spacing.xl,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  testButtonPressed: {
+    opacity: 0.7,
+  },
+
+  testButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  testButtonText: {
+    color: colors.accent,
+    fontFamily: fontFamily.headingBold,
+    fontSize: fontSize.sm,
   },
 
   logoutButton: {
