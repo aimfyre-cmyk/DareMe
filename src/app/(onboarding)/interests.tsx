@@ -1,22 +1,22 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { PrimaryButton } from '../../components/PrimaryButton';
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    radius,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
 } from '../../constants/theme';
 
 const INTERESTS = [
@@ -37,6 +37,8 @@ export default function InterestsScreen() {
     username?: string;
     country?: string;
     language?: string;
+    gender?: string;
+    dateOfBirth?: string;
     ageBracket?: string;
     bio?: string;
   }>();
@@ -56,6 +58,14 @@ export default function InterestsScreen() {
   const language = Array.isArray(params.language)
     ? params.language[0]
     : params.language ?? '';
+
+  const gender = Array.isArray(params.gender)
+    ? params.gender[0]
+    : params.gender ?? '';
+
+  const dateOfBirth = Array.isArray(params.dateOfBirth)
+    ? params.dateOfBirth[0]
+    : params.dateOfBirth ?? '';
 
   const ageBracket = Array.isArray(params.ageBracket)
     ? params.ageBracket[0]
@@ -88,7 +98,15 @@ export default function InterestsScreen() {
       return;
     }
 
-    if (!displayName || !username || !country || !language || !ageBracket) {
+    if (
+      !displayName ||
+      !username ||
+      !country ||
+      !language ||
+      !gender ||
+      !dateOfBirth ||
+      !ageBracket
+    ) {
       setError('Some profile information is missing. Please go back.');
       return;
     }
@@ -100,6 +118,8 @@ export default function InterestsScreen() {
         username,
         country,
         language,
+        gender,
+        dateOfBirth,
         ageBracket,
         bio,
         interests: JSON.stringify(selectedInterests),

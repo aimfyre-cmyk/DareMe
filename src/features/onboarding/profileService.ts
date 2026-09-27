@@ -5,6 +5,8 @@ export type ProfileData = {
   display_name: string;
   country: string;
   language: string;
+  gender: string;
+  date_of_birth: string;
   age_bracket: string;
   bio: string;
   avatar_url?: string | null;
@@ -71,7 +73,9 @@ export async function uploadAvatar(
   const response = await fetch(localUri);
 
   if (!response.ok) {
-    throw new Error('Could not read the selected profile photo.');
+    throw new Error(
+      'Could not read the selected profile photo.',
+    );
   }
 
   const arrayBuffer = await response.arrayBuffer();
@@ -119,6 +123,14 @@ export async function saveProfile(
     throw new Error('Username is required.');
   }
 
+  if (!profile.gender) {
+    throw new Error('Gender is required.');
+  }
+
+  if (!profile.date_of_birth) {
+    throw new Error('Date of birth is required.');
+  }
+
   const { data, error } = await supabase
     .from('profiles')
     .upsert(
@@ -128,6 +140,8 @@ export async function saveProfile(
         display_name: profile.display_name.trim(),
         country: profile.country.trim(),
         language: profile.language.trim(),
+        gender: profile.gender,
+        date_of_birth: profile.date_of_birth,
         age_bracket: profile.age_bracket,
         bio: profile.bio.trim(),
         avatar_url: profile.avatar_url ?? null,
@@ -203,7 +217,8 @@ export async function saveDarePreferences(
     .upsert(
       {
         user_id: userId,
-        difficulty_comfort: preferences.difficulty_comfort,
+        difficulty_comfort:
+          preferences.difficulty_comfort,
         preferred_proof_types:
           preferences.preferred_proof_types,
       },
@@ -251,7 +266,9 @@ export async function getUserInterests(userId: string) {
     throw error;
   }
 
-  return data?.map((item) => item.interest) ?? [];
+  return (
+    data?.map((item) => item.interest) ?? []
+  );
 }
 
 /**

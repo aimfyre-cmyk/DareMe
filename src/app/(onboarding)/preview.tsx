@@ -71,6 +71,8 @@ export default function PreviewScreen() {
     username?: string;
     country?: string;
     language?: string;
+    gender?: string;
+    dateOfBirth?: string;
     ageBracket?: string;
     bio?: string;
     interests?: string;
@@ -82,6 +84,8 @@ export default function PreviewScreen() {
   const username = getParamValue(params.username);
   const country = getParamValue(params.country);
   const language = getParamValue(params.language);
+  const gender = getParamValue(params.gender);
+  const dateOfBirth = getParamValue(params.dateOfBirth);
   const ageBracket = getParamValue(params.ageBracket);
   const bio = getParamValue(params.bio);
   const difficulty = getParamValue(params.difficulty);
@@ -110,6 +114,8 @@ export default function PreviewScreen() {
       !username ||
       !country ||
       !language ||
+      !gender ||
+      !dateOfBirth ||
       !ageBracket
     ) {
       setError('Some profile information is missing.');
@@ -132,7 +138,9 @@ export default function PreviewScreen() {
     }
 
     setSaving(true);
-console.log('[DareMe Avatar] URI before save:', avatarUri);
+
+    console.log('[DareMe Avatar] URI before save:', avatarUri);
+
     try {
       const session = await getCurrentSession();
 
@@ -142,26 +150,28 @@ console.log('[DareMe Avatar] URI before save:', avatarUri);
       }
 
       await saveCompleteOnboarding(
-  session.user.id,
-  {
-    username,
-    display_name: displayName,
-    country,
-    language,
-    age_bracket: ageBracket,
-    bio,
-  },
-  interests,
-  {
-    difficulty_comfort: difficulty,
-    preferred_proof_types: proofTypes as (
-      | 'photo'
-      | 'video'
-      | 'text'
-    )[],
-  },
-  avatarUri,
-);
+        session.user.id,
+        {
+          username,
+          display_name: displayName,
+          country,
+          language,
+          gender,
+          date_of_birth: dateOfBirth,
+          age_bracket: ageBracket,
+          bio,
+        },
+        interests,
+        {
+          difficulty_comfort: difficulty,
+          preferred_proof_types: proofTypes as (
+            | 'photo'
+            | 'video'
+            | 'text'
+          )[],
+        },
+        avatarUri,
+      );
 
       router.replace('/(tabs)');
     } catch (err) {
@@ -251,6 +261,26 @@ console.log('[DareMe Avatar] URI before save:', avatarUri);
 
             <Text style={styles.infoValue}>
               {language}
+            </Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>
+              Gender
+            </Text>
+
+            <Text style={styles.infoValue}>
+              {gender}
+            </Text>
+          </View>
+
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>
+              Date of birth
+            </Text>
+
+            <Text style={styles.infoValue}>
+              {dateOfBirth}
             </Text>
           </View>
 
