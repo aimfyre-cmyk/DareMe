@@ -1,20 +1,34 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
 
+type OtpMode = 'signup' | 'phone_change';
+
 export default function OtpScreen() {
-  const { phone } = useLocalSearchParams<{ phone?: string }>();
+  const params = useLocalSearchParams<{
+    phone?: string;
+    type?: string;
+  }>();
+
+  const phone = Array.isArray(params.phone)
+    ? params.phone[0]
+    : params.phone;
+
+  const mode: OtpMode =
+    params.type === 'phone_change'
+      ? 'phone_change'
+      : 'signup';
 
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,8 +37,12 @@ export default function OtpScreen() {
   const [errorMessage, setErrorMessage] = useState('');
   const [message, setMessage] = useState('');
 
+  const isPhoneChange = mode === 'phone_change';
+
   useEffect(() => {
-    if (countdown <= 0) return;
+    if (countdown <= 0) {
+      return;
+    }
 
     const timer = setInterval(() => {
       setCountdown((current) => current - 1);
@@ -40,7 +58,11 @@ export default function OtpScreen() {
     const cleanOtp = otp.trim();
 
     if (!phone) {
-      setErrorMessage('Mobile number missing hai. Signup dobara karo.');
+      setErrorMessage(
+        isPhoneChange
+          ? 'Mobile number missing hai. Please go back and try again.'
+          : 'Mobile number missing hai. Signup dobara karo.',
+      );
       return;
     }
 
@@ -52,30 +74,52 @@ export default function OtpScreen() {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        phone,
-        token: cleanOtp,
-        type: 'sms',
-      });
+      const { data, error } =
+        await supabase.auth.verifyOtp({
+          phone,
+          token: cleanOtp,
+          type: isPhoneChange
+            ? 'phone_change'
+            : 'sms',
+        });
 
       if (error) {
         setErrorMessage(error.message);
-        setLoading(false);
+        return;
+      }
+
+      if (isPhoneChange) {
+        setMessage(
+          'Mobile number verified and updated successfully.',
+        );
+
+        setTimeout(() => {
+          router.replace('/account');
+        }, 700);
+
         return;
       }
 
       if (!data.session) {
-        setErrorMessage('OTP verify hua, lekin session create nahi hua.');
-        setLoading(false);
+        setErrorMessage(
+          'OTP verify hua, lekin session create nahi hua.',
+        );
         return;
       }
 
-      setMessage('Mobile verified. Setting up your profile...');
+      setMessage(
+        'Mobile verified. Setting up your profile...',
+      );
 
       setTimeout(() => {
         router.replace('/(onboarding)/identity');
       }, 500);
     } catch (error) {
+      console.error(
+        '[DareMe OTP] Verification failed:',
+        error,
+      );
+
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -87,14 +131,19 @@ export default function OtpScreen() {
   };
 
   const handleResend = async () => {
-    if (!phone || countdown > 0 || resending) return;
+    if (!phone || countdown > 0 || resending) {
+      return;
+    }
 
     setErrorMessage('');
     setMessage('');
     setResending(true);
 
     try {
-      const { error } = await supabase.auth.signInWithOtp({
+      const { error } = await supabase.auth.resend({
+        type: isPhoneChange
+          ? 'phone_change'
+          : 'sms',
         phone,
       });
 
@@ -107,6 +156,11 @@ export default function OtpScreen() {
       setCountdown(60);
       setOtp('');
     } catch (error) {
+      console.error(
+        '[DareMe OTP] Resend failed:',
+        error,
+      );
+
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -120,18 +174,30 @@ export default function OtpScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={
+        Platform.OS === 'ios'
+          ? 'padding'
+          : undefined
+      }
     >
       <View style={styles.content}>
         <Text style={styles.logo}>DAREME</Text>
 
-        <Text style={styles.title}>Verify your number.</Text>
-
-        <Text style={styles.subtitle}>
-          We sent a 6-digit verification code to
+        <Text style={styles.title}>
+          {isPhoneChange
+            ? 'Verify your new number.'
+            : 'Verify your number.'}
         </Text>
 
-        <Text style={styles.phone}>{phone || 'your mobile number'}</Text>
+        <Text style={styles.subtitle}>
+          {isPhoneChange
+            ? 'We sent a 6-digit verification code to'
+            : 'We sent a 6-digit verification code to'}
+        </Text>
+
+        <Text style={styles.phone}>
+          {phone || 'your mobile number'}
+        </Text>
 
         <View style={styles.form}>
           <TextInput
@@ -141,23 +207,30 @@ export default function OtpScreen() {
             value={otp}
             onChangeText={(value) => {
               setErrorMessage('');
-              setOtp(value.replace(/\D/g, '').slice(0, 6));
+              setOtp(
+                value.replace(/\D/g, '').slice(0, 6),
+              );
             }}
             keyboardType="number-pad"
             maxLength={6}
             textAlign="center"
             editable={!loading}
+            autoFocus
           />
 
           {errorMessage ? (
             <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{errorMessage}</Text>
+              <Text style={styles.errorText}>
+                {errorMessage}
+              </Text>
             </View>
           ) : null}
 
           {message ? (
             <View style={styles.messageBox}>
-              <Text style={styles.messageText}>{message}</Text>
+              <Text style={styles.messageText}>
+                {message}
+              </Text>
             </View>
           ) : null}
 
@@ -173,7 +246,9 @@ export default function OtpScreen() {
             {loading ? (
               <ActivityIndicator color="#0B0B0D" />
             ) : (
-              <Text style={styles.buttonText}>✓ VERIFY OTP</Text>
+              <Text style={styles.buttonText}>
+                ✓ VERIFY OTP
+              </Text>
             )}
           </Pressable>
 
@@ -188,7 +263,8 @@ export default function OtpScreen() {
               <Text
                 style={[
                   styles.resendText,
-                  countdown > 0 && styles.resendDisabled,
+                  countdown > 0 &&
+                    styles.resendDisabled,
                 ]}
               >
                 {countdown > 0
@@ -203,7 +279,11 @@ export default function OtpScreen() {
             disabled={loading}
             style={styles.backButton}
           >
-            <Text style={styles.backText}>Change mobile number</Text>
+            <Text style={styles.backText}>
+              {isPhoneChange
+                ? 'Change mobile number'
+                : 'Change mobile number'}
+            </Text>
           </Pressable>
         </View>
       </View>

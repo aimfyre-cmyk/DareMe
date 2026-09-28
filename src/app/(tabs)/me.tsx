@@ -1,7 +1,9 @@
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Image,
   Pressable,
   StyleSheet,
@@ -21,9 +23,13 @@ import {
   radius,
   spacing,
 } from '../../constants/theme';
-import { getProfile } from '../../features/onboarding/profileService';
+import {
+  getProfile,
+  uploadAvatar,
+} from '../../features/onboarding/profileService';
 import { getCurrentSession, signOut } from '../../lib/auth';
 import { transitionDare } from '../../lib/dareTransitions';
+import { supabase } from '../../lib/supabase';
 
 type Profile = {
   username: string;
@@ -47,6 +53,8 @@ export default function MeScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] =
+    useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [testingDare, setTestingDare] =
     useState<TestState>('idle');
@@ -98,6 +106,113 @@ export default function MeScreen() {
     }
   };
 
+  const handlePickAvatar = async () => {
+    if (uploadingAvatar) {
+      return;
+    }
+
+    setErrorMessage('');
+    setUploadingAvatar(true);
+
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          'Permission required',
+          'Please allow photo library access to choose a profile picture.',
+        );
+        return;
+      }
+
+      const result =
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.85,
+        });
+
+      if (
+        result.canceled ||
+        !result.assets?.length
+      ) {
+        return;
+      }
+
+      const selectedUri = result.assets[0].uri;
+
+      console.log(
+        '[DareMe Avatar] Selected URI:',
+        selectedUri,
+      );
+
+      const session = await getCurrentSession();
+
+      if (!session?.user) {
+        setErrorMessage(
+          'Your session has expired. Please log in again.',
+        );
+        return;
+      }
+
+      const avatarUrl = await uploadAvatar(
+        session.user.id,
+        selectedUri,
+      );
+
+      console.log(
+        '[DareMe Avatar] Uploaded URL:',
+        avatarUrl,
+      );
+
+      const { error: updateError } =
+        await supabase
+          .from('profiles')
+          .update({
+            avatar_url: avatarUrl,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', session.user.id);
+
+      if (updateError) {
+        console.error(
+          '[DareMe Avatar] Profile update failed:',
+          updateError,
+        );
+
+        throw updateError;
+      }
+
+      setProfile((current) =>
+        current
+          ? {
+              ...current,
+              avatar_url: avatarUrl,
+            }
+          : current,
+      );
+
+      console.log(
+        '[DareMe Avatar] Profile photo updated successfully.',
+      );
+    } catch (error) {
+      console.error(
+        '[DareMe Avatar] Upload failed:',
+        error,
+      );
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Could not update your profile photo.',
+      );
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
   const handleLogout = async () => {
     if (loggingOut) return;
 
@@ -126,20 +241,6 @@ export default function MeScreen() {
 
   /**
    * TEMPORARY PHASE 6 QA TEST
-   *
-   * Current test participant:
-   * ACCEPTED
-   *
-   * Expected transition:
-   * ACCEPTED → IN_PROGRESS
-   *
-   * This verifies:
-   * Expo client
-   * → authenticated Supabase session
-   * → Edge Function
-   * → backend wrapper
-   * → state machine
-   * → database
    *
    * Remove this test UI after Phase 6 verification.
    */
@@ -202,15 +303,39 @@ export default function MeScreen() {
     <Screen>
       <View style={styles.headerRow}>
         <View style={styles.identity}>
-          {profile?.avatar_url ? (
-            <Image
-              source={{ uri: profile.avatar_url }}
-              style={styles.profileAvatar}
-              resizeMode="cover"
-            />
-          ) : (
-            <Avatar size={64} />
-          )}
+          <Pressable
+            onPress={handlePickAvatar}
+            disabled={uploadingAvatar}
+            style={({ pressed }) => [
+              styles.avatarButton,
+              pressed && styles.avatarPressed,
+              uploadingAvatar &&
+                styles.avatarUploading,
+            ]}
+          >
+            {profile?.avatar_url ? (
+              <Image
+                source={{ uri: profile.avatar_url }}
+                style={styles.profileAvatar}
+                resizeMode="cover"
+              />
+            ) : (
+              <Avatar size={64} />
+            )}
+
+            <View style={styles.avatarEditBadge}>
+              {uploadingAvatar ? (
+                <ActivityIndicator
+                  size="small"
+                  color={colors.background}
+                />
+              ) : (
+                <Text style={styles.avatarEditText}>
+                  EDIT
+                </Text>
+              )}
+            </View>
+          </Pressable>
 
           <View>
             <Text style={styles.username}>
@@ -228,9 +353,7 @@ export default function MeScreen() {
         <IconButton
           accessibilityLabel="Open settings"
           variant="surface"
-          onPress={() => {
-            // Settings will be added in a later phase.
-          }}
+          onPress={() => router.push('/(settings)')}
         >
           <Text style={styles.settingsIcon}>
             ⚙
@@ -391,11 +514,46 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
 
+  avatarButton: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.pill,
+    position: 'relative',
+  },
+
+  avatarPressed: {
+    opacity: 0.75,
+  },
+
+  avatarUploading: {
+    opacity: 0.65,
+  },
+
   profileAvatar: {
     width: 64,
     height: 64,
     borderRadius: radius.pill,
     backgroundColor: colors.surfaceElevated,
+  },
+
+  avatarEditBadge: {
+    position: 'absolute',
+    right: -4,
+    bottom: -2,
+    minWidth: 30,
+    minHeight: 22,
+    paddingHorizontal: 5,
+    borderRadius: radius.pill,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  avatarEditText: {
+    color: colors.background,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: 8,
+    letterSpacing: 0.4,
   },
 
   username: {
