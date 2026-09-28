@@ -88,7 +88,7 @@ export default function SettingsScreen() {
           <SettingsRow
             title="Privacy"
             description="Control who can see and interact with you"
-            onPress={() => {}}
+            onPress={() => router.push('/privacy')}
           />
 
           <View style={styles.divider} />
