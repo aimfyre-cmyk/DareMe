@@ -96,7 +96,7 @@ export default function SettingsScreen() {
           <SettingsRow
             title="Safety"
             description="Blocked users and reports"
-            onPress={() => {}}
+            onPress={() => router.push('/safety')}
           />
         </View>
 
