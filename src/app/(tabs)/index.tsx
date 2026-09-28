@@ -1,16 +1,15 @@
 import { router } from 'expo-router';
-import { View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppHeader } from '../../components/AppHeader';
 import { DareCard } from '../../components/DareCard';
 import { EmptyState } from '../../components/EmptyState';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
+import { colors, spacing } from '../../constants/theme';
 import { mockHomeDares } from '../../data/mockDares';
 
 /**
- * HOME / DARE FEED — Phase 2 shell only.
- * Static mock dares demonstrate layout; real feed composition arrives in
- * Phase 9 (Feed/Discovery), backed by the dare engine from Phase 6.
+ * HOME / DARE FEED
  */
 export default function HomeScreen() {
   const hasDares = mockHomeDares.length > 0;
@@ -21,6 +20,17 @@ export default function HomeScreen() {
         title="DareMe"
         showAvatar
         onAvatarPress={() => router.push('./me')}
+        rightSlot={
+          <Pressable
+            onPress={() => router.push('/search')}
+            style={styles.searchButton}
+            accessibilityRole="button"
+            accessibilityLabel="Search"
+            hitSlop={10}
+          >
+            <Text style={styles.searchIcon}>⌕</Text>
+          </Pressable>
+        }
       />
 
       <SectionHeader title="For You" />
@@ -49,3 +59,20 @@ export default function HomeScreen() {
     </Screen>
   );
 }
+
+const styles = StyleSheet.create({
+  searchButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.xs,
+  },
+  searchIcon: {
+    color: colors.primaryText,
+    fontSize: 28,
+    lineHeight: 30,
+    fontWeight: '500',
+  },
+});
