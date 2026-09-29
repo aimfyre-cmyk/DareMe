@@ -353,14 +353,24 @@ export default function MeScreen() {
           label="Posts"
           value={String(posts.length)}
         />
-        <Stat
-          label="Followers"
-          value={String(followersCount)}
-        />
-        <Stat
-          label="Following"
-          value={String(followingCount)}
-        />
+        <Pressable
+          style={styles.stat}
+          onPress={() => router.push('/follow-list?type=followers' as any)}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${followersCount} followers`}
+        >
+          <Text style={styles.statValue}>{followersCount}</Text>
+          <Text style={styles.statLabel}>Followers</Text>
+        </Pressable>
+        <Pressable
+          style={styles.stat}
+          onPress={() => router.push('/follow-list?type=following' as any)}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${followingCount} following`}
+        >
+          <Text style={styles.statValue}>{followingCount}</Text>
+          <Text style={styles.statLabel}>Following</Text>
+        </Pressable>
       </View>
 
       <View style={styles.gameStats}>

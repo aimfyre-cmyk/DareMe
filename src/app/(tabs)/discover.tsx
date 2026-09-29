@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
@@ -937,6 +938,8 @@ function PostCard({
   onLike: () => void;
   onComment: () => void;
 }) {
+  const router = useRouter();
+
   const displayName =
     post.profile?.display_name ||
     post.profile?.username ||
@@ -958,7 +961,21 @@ function PostCard({
   return (
     <View style={styles.postCard}>
       {/* Author */}
-      <View style={styles.postHeader}>
+      <Pressable
+        style={styles.postHeader}
+        onPress={() => {
+          if (post.profile?.id) {
+            router.push({
+              pathname: '/public-profile',
+              params: {
+                userId: post.profile.id,
+              },
+            });
+          }
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${displayName}'s profile`}
+      >
         {post.profile?.avatar_url ? (
           <Image
             source={{
@@ -999,7 +1016,7 @@ function PostCard({
             </Text>
           ) : null}
         </View>
-      </View>
+      </Pressable>
 
       {/* Caption */}
       {post.content ? (

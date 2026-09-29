@@ -1,22 +1,22 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Keyboard,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Keyboard,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    radius,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
 } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 
@@ -150,7 +150,7 @@ export default function SearchScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => router.replace('/(tabs)')}
           style={styles.backButton}
         >
           <Text style={styles.backText}>‹</Text>
@@ -264,9 +264,12 @@ export default function SearchScreen() {
                     pressed && styles.cardPressed,
                   ]}
                   onPress={() =>
-                    router.push(
-                      `/profile/${person.id}` as any,
-                    )
+                    router.push({
+                      pathname: '/public-profile',
+                      params: {
+                        userId: person.id,
+                      },
+                    })
                   }
                 >
                   <View style={styles.avatar}>
