@@ -163,7 +163,6 @@ export default function HomeScreen() {
         </View>
       ) : hasDares ? (
         <View style={styles.feed}>
-          {/* Dare-first identity */}
           <View style={styles.featuredHeader}>
             <Text style={styles.featuredLabel}>
               🔥 TODAY'S DARES
@@ -179,17 +178,21 @@ export default function HomeScreen() {
               key={dare.id}
               dare={dare}
               onPress={() => {
-                console.log(
-                  '[Home] Open dare:',
-                  dare.id,
-                );
+                router.push({
+                  pathname: '/dare-detail',
+                  params: {
+                    id: dare.id,
+                  },
+                });
               }}
               onPrimaryAction={() => {
-                console.log(
-                  '[Home] Take dare:',
-                  dare.id,
-                );
-              }}
+  router.push({
+    pathname: '/dare-detail',
+    params: {
+      id: dare.id,
+    },
+  });
+}}
             />
           ))}
 
