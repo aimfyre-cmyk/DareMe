@@ -3,11 +3,11 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { AppHeader } from '../../components/AppHeader';
 import { DareCard } from '../../components/DareCard';
 import { EmptyState } from '../../components/EmptyState';
+import { NotificationBell } from '../../components/NotificationBell';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
 import { colors, spacing } from '../../constants/theme';
 import { mockHomeDares } from '../../data/mockDares';
-
 /**
  * HOME / DARE FEED
  */
@@ -21,15 +21,21 @@ export default function HomeScreen() {
         showAvatar
         onAvatarPress={() => router.push('./me')}
         rightSlot={
-          <Pressable
-            onPress={() => router.push('/search')}
-            style={styles.searchButton}
-            accessibilityRole="button"
-            accessibilityLabel="Search"
-            hitSlop={10}
-          >
-            <Text style={styles.searchIcon}>⌕</Text>
-          </Pressable>
+          <View style={styles.headerActions}>
+            {/* Search */}
+            <Pressable
+              onPress={() => router.push('/search')}
+              style={styles.iconButton}
+              accessibilityRole="button"
+              accessibilityLabel="Search"
+              hitSlop={10}
+            >
+              <Text style={styles.searchIcon}>⌕</Text>
+            </Pressable>
+
+            {/* Notifications */}
+            <NotificationBell />
+          </View>
         }
       />
 
@@ -61,18 +67,31 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  searchButton: {
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+
+  iconButton: {
     width: 36,
     height: 36,
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing.xs,
   },
+
   searchIcon: {
     color: colors.primaryText,
     fontSize: 28,
     lineHeight: 30,
+    fontWeight: '500',
+  },
+
+  notificationIcon: {
+    color: colors.primaryText,
+    fontSize: 25,
+    lineHeight: 28,
     fontWeight: '500',
   },
 });
