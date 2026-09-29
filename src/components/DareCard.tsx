@@ -50,24 +50,40 @@ export function DareCard({
 
   return (
     <View style={styles.card}>
+      {/* Tags */}
       <View style={styles.tagRow}>
-        <Chip label={dare.category} variant="neutral" />
+        <Chip
+          label={dare.category}
+          variant="neutral"
+        />
+
         <Chip
           label={dare.difficulty}
           variant={difficultyVariant[dare.difficulty]}
         />
       </View>
 
-      <Text style={styles.title}>{dare.title}</Text>
+      {/* Title */}
+      <Text style={styles.title}>
+        {dare.title}
+      </Text>
 
+      {/* Meta */}
       <View style={styles.metaRow}>
-        <Text style={styles.meta}>+{dare.xpValue} XP</Text>
-        <Text style={styles.metaDot}>·</Text>
+        <Text style={styles.meta}>
+          +{dare.xpValue} XP
+        </Text>
+
+        <Text style={styles.metaDot}>
+          ·
+        </Text>
+
         <Text style={styles.meta}>
           {dare.proofType} proof
         </Text>
       </View>
 
+      {/* CTA */}
       <Pressable
         onPress={handlePrimaryPress}
         accessibilityRole="button"

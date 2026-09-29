@@ -1,18 +1,112 @@
 import { router } from 'expo-router';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+
 import { AppHeader } from '../../components/AppHeader';
-import { DareCard } from '../../components/DareCard';
+import { DareCard, MockDare } from '../../components/DareCard';
 import { EmptyState } from '../../components/EmptyState';
 import { NotificationBell } from '../../components/NotificationBell';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
-import { colors, spacing } from '../../constants/theme';
-import { mockHomeDares } from '../../data/mockDares';
-/**
- * HOME / DARE FEED
- */
+
+import { colors, fontSize, spacing } from '../../constants/theme';
+import { supabase } from '../../lib/supabase';
+
+type DareRow = {
+  id: string;
+  title: string;
+  category: string;
+  difficulty: string;
+  xp_value: number;
+  proof_type: string;
+  status: string;
+  visibility: string;
+  created_at: string;
+};
+
+function formatDifficulty(value: string): MockDare['difficulty'] {
+  const normalized = value.toLowerCase();
+
+  if (normalized === 'hard') {
+    return 'Hard';
+  }
+
+  if (normalized === 'medium') {
+    return 'Medium';
+  }
+
+  return 'Easy';
+}
+
+function formatProofType(value: string): MockDare['proofType'] {
+  const normalized = value.toLowerCase();
+
+  if (normalized === 'photo') {
+    return 'Photo';
+  }
+
+  if (normalized === 'video') {
+    return 'Video';
+  }
+
+  return 'Text';
+}
+
 export default function HomeScreen() {
-  const hasDares = mockHomeDares.length > 0;
+  const [dares, setDares] = useState<MockDare[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadDares = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const { data, error: fetchError } = await supabase
+        .from('dares')
+        .select(
+          'id, title, category, difficulty, xp_value, proof_type, status, visibility, created_at',
+        )
+        .eq('status', 'active')
+        .eq('visibility', 'anyone')
+        .order('created_at', { ascending: false });
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      const mappedDares: MockDare[] = ((data ?? []) as DareRow[]).map(
+        (dare) => ({
+          id: dare.id,
+          title: dare.title,
+          category: dare.category,
+          difficulty: formatDifficulty(dare.difficulty),
+          xpValue: dare.xp_value,
+          proofType: formatProofType(dare.proof_type),
+        }),
+      );
+
+      setDares(mappedDares);
+    } catch (err) {
+      console.error('[Home] Failed to load dares:', err);
+      setError('Unable to load dares right now.');
+      setDares([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDares();
+  }, [loadDares]);
+
+  const hasDares = dares.length > 0;
 
   return (
     <Screen>
@@ -41,25 +135,87 @@ export default function HomeScreen() {
 
       <SectionHeader title="For You" />
 
-      {hasDares ? (
-        <View>
-          {mockHomeDares.map((dare) => (
+      {loading ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator
+            size="small"
+            color={colors.accent}
+          />
+
+          <Text style={styles.stateText}>
+            Loading dares...
+          </Text>
+        </View>
+      ) : error ? (
+        <View style={styles.centerState}>
+          <Text style={styles.errorText}>
+            {error}
+          </Text>
+
+          <Pressable
+            onPress={loadDares}
+            style={styles.retryButton}
+          >
+            <Text style={styles.retryText}>
+              Try Again
+            </Text>
+          </Pressable>
+        </View>
+      ) : hasDares ? (
+        <View style={styles.feed}>
+          {/* Dare-first identity */}
+          <View style={styles.featuredHeader}>
+            <Text style={styles.featuredLabel}>
+              🔥 TODAY'S DARES
+            </Text>
+
+            <Text style={styles.featuredSubtitle}>
+              Pick a dare. Take the challenge.
+            </Text>
+          </View>
+
+          {dares.map((dare) => (
             <DareCard
               key={dare.id}
               dare={dare}
               onPress={() => {
-                // Phase 5+: navigate to Dare Detail with dare.id
+                console.log(
+                  '[Home] Open dare:',
+                  dare.id,
+                );
               }}
               onPrimaryAction={() => {
-                // Phase 6: accept dare, move to Active Dare
+                console.log(
+                  '[Home] Take dare:',
+                  dare.id,
+                );
               }}
             />
           ))}
+
+          <View style={styles.discoverSection}>
+            <Text style={styles.discoverTitle}>
+              Want to explore more?
+            </Text>
+
+            <Pressable
+              onPress={() =>
+                router.push('/(tabs)/discover')
+              }
+              style={styles.discoverButton}
+              accessibilityRole="button"
+              accessibilityLabel="Explore more dares"
+            >
+              <Text style={styles.discoverButtonText}>
+                Explore Discover
+              </Text>
+            </Pressable>
+          </View>
         </View>
       ) : (
         <EmptyState
-          title="You're all caught up"
-          description="Check back soon for new dares, or explore Discover."
+          title="No new dares yet"
+          description="Check back soon for fresh challenges, or explore Discover."
         />
       )}
     </Screen>
@@ -88,10 +244,88 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
-  notificationIcon: {
+  feed: {
+    paddingBottom: spacing.xl,
+  },
+
+  featuredHeader: {
+    marginBottom: spacing.md,
+  },
+
+  featuredLabel: {
+    color: colors.accent,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
+
+  featuredSubtitle: {
+    color: colors.secondaryText,
+    fontSize: fontSize.sm,
+    marginTop: spacing.xs,
+  },
+
+  centerState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xl,
+  },
+
+  stateText: {
+    color: colors.secondaryText,
+    fontSize: fontSize.sm,
+    marginTop: spacing.sm,
+  },
+
+  errorText: {
+    color: colors.danger,
+    fontSize: fontSize.sm,
+    textAlign: 'center',
+    marginBottom: spacing.md,
+  },
+
+  retryButton: {
+    minHeight: 42,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 21,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+
+  retryText: {
     color: colors.primaryText,
-    fontSize: 25,
-    lineHeight: 28,
-    fontWeight: '500',
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+  },
+
+  discoverSection: {
+    marginTop: spacing.lg,
+    paddingVertical: spacing.lg,
+    alignItems: 'center',
+  },
+
+  discoverTitle: {
+    color: colors.primaryText,
+    fontSize: fontSize.md,
+    fontWeight: '600',
+    marginBottom: spacing.sm,
+  },
+
+  discoverButton: {
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 22,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  discoverButtonText: {
+    color: colors.background,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
   },
 });
