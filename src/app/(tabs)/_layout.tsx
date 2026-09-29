@@ -1,5 +1,4 @@
 import { Tabs } from 'expo-router';
-import React from 'react';
 import { Text } from 'react-native';
 import { colors } from '../../constants/theme';
 
@@ -55,6 +54,12 @@ export default function TabsLayout() {
           tabBarLabelStyle: { fontSize: 11, color: colors.accent },
         }}
       />
+      <Tabs.Screen
+  name="create-dare"
+  options={{
+    href: null,
+  }}
+/>
       <Tabs.Screen
         name="dares"
         options={{

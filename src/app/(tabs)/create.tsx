@@ -1,100 +1,80 @@
-import React, { useState } from 'react';
+import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Chip } from '../../components/Chip';
-import { Input } from '../../components/Input';
-import { PrimaryButton } from '../../components/PrimaryButton';
 import { Screen } from '../../components/Screen';
-import { SectionHeader } from '../../components/SectionHeader';
-import { colors, fontFamily, fontSize, spacing } from '../../constants/theme';
-import { discoverCategories } from '../../data/mockDares';
+import {
+  colors,
+  fontFamily,
+  fontSize,
+  spacing,
+} from '../../constants/theme';
 
-const difficulties = ['Easy', 'Medium', 'Hard'] as const;
-const visibilities = ['Anyone', 'Followers', 'Connections'] as const;
+type CreateOptionProps = {
+  icon: string;
+  title: string;
+  description: string;
+  onPress: () => void;
+};
 
-/**
- * CREATE — Phase 2 shell only. UI ONLY: no persistence, no API calls,
- * no AI generation. Selections are local component state so the screen
- * feels real, but nothing here survives navigating away. Real dare
- * creation (validation, safety check, publish) arrives in Phase 6.
- */
 export default function CreateScreen() {
-  const [category, setCategory] = useState<string | null>(null);
-  const [difficulty, setDifficulty] = useState<(typeof difficulties)[number] | null>(null);
-  const [visibility, setVisibility] = useState<(typeof visibilities)[number] | null>(null);
-
   return (
     <Screen>
-      <Text style={styles.heading} accessibilityRole="header">
-        Create a Dare
-      </Text>
+      <Text style={styles.heading}>Create</Text>
       <Text style={styles.subheading}>
-        This screen is a preview — publishing isn&apos;t connected yet.
+        Share a dare, post, or reel with the DareMe community.
       </Text>
 
-      <SectionHeader title="What's the dare?" />
-      <Input placeholder="Describe the dare..." multiline numberOfLines={4} />
+      <View style={styles.options}>
+        <CreateOption
+          icon="⚡"
+          title="Create Dare"
+          description="Challenge yourself or someone else."
+          onPress={() => router.push('/(tabs)/create-dare' as any)}
+        />
 
-      <SectionHeader title="Category" />
-      <View style={styles.chipWrap}>
-        {discoverCategories.map((item) => (
-          <SelectableChip
-            key={item}
-            label={item}
-            selected={category === item}
-            onPress={() => setCategory(item)}
-          />
-        ))}
-      </View>
+        <CreateOption
+          icon="📸"
+          title="Create Post"
+          description="Share a photo or text with the community."
+          onPress={() => router.push('/create-post' as any)}
+        />
 
-      <SectionHeader title="Difficulty" />
-      <View style={styles.chipWrap}>
-        {difficulties.map((item) => (
-          <SelectableChip
-            key={item}
-            label={item}
-            selected={difficulty === item}
-            onPress={() => setDifficulty(item)}
-          />
-        ))}
-      </View>
-
-      <SectionHeader title="Who can see this" />
-      <View style={styles.chipWrap}>
-        {visibilities.map((item) => (
-          <SelectableChip
-            key={item}
-            label={item}
-            selected={visibility === item}
-            onPress={() => setVisibility(item)}
-          />
-        ))}
-      </View>
-
-      <View style={styles.ctaWrap}>
-        <PrimaryButton label="Publish Dare" disabled />
-        <Text style={styles.disabledNote}>Publishing arrives in a later phase.</Text>
+        <CreateOption
+          icon="🎬"
+          title="Create Reel"
+          description="Share a short vertical video."
+          onPress={() => router.push('/create-reel' as any)}
+        />
       </View>
     </Screen>
   );
 }
 
-function SelectableChip({
-  label,
-  selected,
+function CreateOption({
+  icon,
+  title,
+  description,
   onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
+}: CreateOptionProps) {
   return (
     <Pressable
       onPress={onPress}
+      style={({ pressed }) => [
+        styles.card,
+        pressed && styles.cardPressed,
+      ]}
       accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ selected }}
+      accessibilityLabel={title}
     >
-      <Chip label={label} variant={selected ? 'accent' : 'neutral'} />
+      <View style={styles.iconBox}>
+        <Text style={styles.icon}>{icon}</Text>
+      </View>
+
+      <View style={styles.textContainer}>
+        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.description}>{description}</Text>
+      </View>
+
+      <Text style={styles.arrow}>›</Text>
     </Pressable>
   );
 }
@@ -106,26 +86,68 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xxl,
     marginTop: spacing.lg,
   },
+
   subheading: {
     color: colors.secondaryText,
     fontFamily: fontFamily.body,
     fontSize: fontSize.sm,
     marginTop: spacing.xs,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xl,
+    lineHeight: 20,
   },
-  chipWrap: {
+
+  options: {
+    gap: spacing.md,
+  },
+
+  card: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  ctaWrap: {
-    marginTop: spacing.xxl,
     alignItems: 'center',
-    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    padding: spacing.md,
   },
-  disabledNote: {
+
+  cardPressed: {
+    opacity: 0.7,
+  },
+
+  iconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+  },
+
+  icon: {
+    fontSize: 24,
+  },
+
+  textContainer: {
+    flex: 1,
+    marginLeft: spacing.md,
+  },
+
+  title: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.md,
+  },
+
+  description: {
     color: colors.secondaryText,
     fontFamily: fontFamily.body,
-    fontSize: fontSize.xs,
+    fontSize: fontSize.sm,
+    marginTop: 4,
+  },
+
+  arrow: {
+    color: colors.secondaryText,
+    fontSize: 28,
+    marginLeft: spacing.sm,
   },
 });

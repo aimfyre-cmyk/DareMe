@@ -12,26 +12,15 @@ import {
 } from 'react-native';
 
 import { Avatar } from '../../components/Avatar';
-import { EmptyState } from '../../components/EmptyState';
 import { IconButton } from '../../components/IconButton';
 import { Screen } from '../../components/Screen';
-import { SectionHeader } from '../../components/SectionHeader';
-import {
-  colors,
-  fontFamily,
-  fontSize,
-  radius,
-  spacing,
-} from '../../constants/theme';
-import {
-  getProfile,
-  uploadAvatar,
-} from '../../features/onboarding/profileService';
+import { colors, fontFamily, fontSize, radius, spacing } from '../../constants/theme';
+import { getProfile, uploadAvatar } from '../../features/onboarding/profileService';
 import { getCurrentSession, signOut } from '../../lib/auth';
-import { transitionDare } from '../../lib/dareTransitions';
 import { supabase } from '../../lib/supabase';
 
 type Profile = {
+  id: string;
   username: string;
   display_name: string;
   avatar_url: string | null;
@@ -40,24 +29,26 @@ type Profile = {
   streak_count: number;
 };
 
-type TestState =
-  | 'idle'
-  | 'testing'
-  | 'success'
-  | 'error';
-
-const TEST_PARTICIPANT_ID =
-  '063dccd4-e4b9-45a4-8389-06e7138506b4';
+type UserPost = {
+  id: string;
+  content: string | null;
+  media_url: string | null;
+  media_type: string | null;
+  created_at: string;
+  signedMediaUrl: string | null;
+};
 
 export default function MeScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [posts, setPosts] = useState<UserPost[]>([]);
+  const [followersCount, setFollowersCount] = useState(0);
+  const [followingCount, setFollowingCount] = useState(0);
+
   const [loading, setLoading] = useState(true);
+  const [postsLoading, setPostsLoading] = useState(true);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
-  const [uploadingAvatar, setUploadingAvatar] =
-    useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [testingDare, setTestingDare] =
-    useState<TestState>('idle');
 
   useEffect(() => {
     loadProfile();
@@ -65,17 +56,20 @@ export default function MeScreen() {
 
   const loadProfile = async () => {
     setLoading(true);
+    setPostsLoading(true);
     setErrorMessage('');
 
     try {
       const session = await getCurrentSession();
 
-      if (!session) {
+      if (!session?.user) {
         router.replace('/(auth)/login' as any);
         return;
       }
 
-      const data = await getProfile(session.user.id);
+      const userId = session.user.id;
+
+      const data = await getProfile(userId);
 
       if (!data) {
         setErrorMessage('Profile not found.');
@@ -83,6 +77,7 @@ export default function MeScreen() {
       }
 
       setProfile({
+        id: userId,
         username: data.username,
         display_name: data.display_name,
         avatar_url: data.avatar_url ?? null,
@@ -90,12 +85,13 @@ export default function MeScreen() {
         level: data.level ?? 1,
         streak_count: data.streak_count ?? 0,
       });
-    } catch (error) {
-      console.error(
-        '[DareMe Profile] Failed to load profile:',
-        error,
-      );
 
+      await Promise.all([
+        loadFollowCounts(userId),
+        loadUserPosts(userId),
+      ]);
+    } catch (error) {
+      console.error('[DareMe Profile] Failed to load profile:', error);
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -103,13 +99,93 @@ export default function MeScreen() {
       );
     } finally {
       setLoading(false);
+      setPostsLoading(false);
+    }
+  };
+
+  const loadFollowCounts = async (userId: string) => {
+    const [{ count: followers }, { count: following }] =
+      await Promise.all([
+        supabase
+          .from('follows')
+          .select('id', { count: 'exact', head: true })
+          .eq('following_id', userId),
+        supabase
+          .from('follows')
+          .select('id', { count: 'exact', head: true })
+          .eq('follower_id', userId),
+      ]);
+
+    setFollowersCount(followers ?? 0);
+    setFollowingCount(following ?? 0);
+  };
+
+  const loadUserPosts = async (userId: string) => {
+    setPostsLoading(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('posts')
+        .select('id,content,media_url,media_type,created_at')
+        .eq('user_id', userId)
+        .eq('status', 'active')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      const rows = (data ?? []) as Array<{
+        id: string;
+        content: string | null;
+        media_url: string | null;
+        media_type: string | null;
+        created_at: string;
+      }>;
+
+      const withUrls = await Promise.all(
+        rows.map(async (post) => {
+          if (!post.media_url || post.media_type !== 'image') {
+            return {
+              ...post,
+              signedMediaUrl: null,
+            };
+          }
+
+          const { data: signed, error: signedError } =
+            await supabase.storage
+              .from('post-media')
+              .createSignedUrl(post.media_url, 60 * 60);
+
+          if (signedError) {
+            console.error(
+              '[DareMe Profile] Signed image URL failed:',
+              signedError,
+            );
+          }
+
+          return {
+            ...post,
+            signedMediaUrl: signed?.signedUrl ?? null,
+          };
+        }),
+      );
+
+      setPosts(withUrls);
+    } catch (error) {
+      console.error('[DareMe Profile] Failed to load posts:', error);
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : 'Could not load your posts.',
+      );
+    } finally {
+      setPostsLoading(false);
     }
   };
 
   const handlePickAvatar = async () => {
-    if (uploadingAvatar) {
-      return;
-    }
+    if (uploadingAvatar) return;
 
     setErrorMessage('');
     setUploadingAvatar(true);
@@ -126,28 +202,18 @@ export default function MeScreen() {
         return;
       }
 
-      const result =
-        await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          allowsEditing: true,
-          aspect: [1, 1],
-          quality: 0.85,
-        });
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
 
-      if (
-        result.canceled ||
-        !result.assets?.length
-      ) {
+      if (result.canceled || !result.assets?.length) {
         return;
       }
 
       const selectedUri = result.assets[0].uri;
-
-      console.log(
-        '[DareMe Avatar] Selected URI:',
-        selectedUri,
-      );
-
       const session = await getCurrentSession();
 
       if (!session?.user) {
@@ -162,26 +228,15 @@ export default function MeScreen() {
         selectedUri,
       );
 
-      console.log(
-        '[DareMe Avatar] Uploaded URL:',
-        avatarUrl,
-      );
-
-      const { error: updateError } =
-        await supabase
-          .from('profiles')
-          .update({
-            avatar_url: avatarUrl,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', session.user.id);
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          avatar_url: avatarUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', session.user.id);
 
       if (updateError) {
-        console.error(
-          '[DareMe Avatar] Profile update failed:',
-          updateError,
-        );
-
         throw updateError;
       }
 
@@ -193,16 +248,8 @@ export default function MeScreen() {
             }
           : current,
       );
-
-      console.log(
-        '[DareMe Avatar] Profile photo updated successfully.',
-      );
     } catch (error) {
-      console.error(
-        '[DareMe Avatar] Upload failed:',
-        error,
-      );
-
+      console.error('[DareMe Avatar] Upload failed:', error);
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -221,16 +268,10 @@ export default function MeScreen() {
 
     try {
       await signOut();
-
       router.replace('/(auth)/login' as any);
     } catch (error) {
-      console.error(
-        '[DareMe Auth] Logout error:',
-        error,
-      );
-
+      console.error('[DareMe Auth] Logout error:', error);
       setLoggingOut(false);
-
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -239,61 +280,12 @@ export default function MeScreen() {
     }
   };
 
-  /**
-   * TEMPORARY PHASE 6 QA TEST
-   *
-   * Remove this test UI after Phase 6 verification.
-   */
-  const handleTestDareTransition = async () => {
-    if (testingDare === 'testing') return;
-
-    setTestingDare('testing');
-    setErrorMessage('');
-
-    try {
-      const result = await transitionDare(
-        TEST_PARTICIPANT_ID,
-        'complete',
-      );
-
-      console.log(
-        '[DareMe] Edge Function test result:',
-        result,
-      );
-
-      setTestingDare('success');
-
-      setErrorMessage(
-        `Dare transition successful: ${result.state}`,
-      );
-    } catch (error) {
-      console.error(
-        '[DareMe] Edge Function test failed:',
-        error,
-      );
-
-      setTestingDare('error');
-
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : 'Dare transition test failed.',
-      );
-    }
-  };
-
   if (loading) {
     return (
       <Screen>
         <View style={styles.loading}>
-          <ActivityIndicator
-            size="large"
-            color={colors.accent}
-          />
-
-          <Text style={styles.loadingText}>
-            Loading profile...
-          </Text>
+          <ActivityIndicator size="large" color={colors.accent} />
+          <Text style={styles.loadingText}>Loading profile...</Text>
         </View>
       </Screen>
     );
@@ -309,8 +301,7 @@ export default function MeScreen() {
             style={({ pressed }) => [
               styles.avatarButton,
               pressed && styles.avatarPressed,
-              uploadingAvatar &&
-                styles.avatarUploading,
+              uploadingAvatar && styles.avatarUploading,
             ]}
           >
             {profile?.avatar_url ? (
@@ -330,14 +321,12 @@ export default function MeScreen() {
                   color={colors.background}
                 />
               ) : (
-                <Text style={styles.avatarEditText}>
-                  EDIT
-                </Text>
+                <Text style={styles.avatarEditText}>EDIT</Text>
               )}
             </View>
           </Pressable>
 
-          <View>
+          <View style={styles.identityText}>
             <Text style={styles.username}>
               {profile?.display_name || 'Your name'}
             </Text>
@@ -355,23 +344,34 @@ export default function MeScreen() {
           variant="surface"
           onPress={() => router.push('/(settings)')}
         >
-          <Text style={styles.settingsIcon}>
-            ⚙
-          </Text>
+          <Text style={styles.settingsIcon}>⚙</Text>
         </IconButton>
       </View>
 
-      <View style={styles.statRow}>
+      <View style={styles.followStats}>
+        <Stat
+          label="Posts"
+          value={String(posts.length)}
+        />
+        <Stat
+          label="Followers"
+          value={String(followersCount)}
+        />
+        <Stat
+          label="Following"
+          value={String(followingCount)}
+        />
+      </View>
+
+      <View style={styles.gameStats}>
         <Stat
           label="Level"
           value={String(profile?.level ?? 1)}
         />
-
         <Stat
           label="XP"
           value={String(profile?.xp_total ?? 0)}
         />
-
         <Stat
           label="Streak"
           value={String(profile?.streak_count ?? 0)}
@@ -379,70 +379,68 @@ export default function MeScreen() {
       </View>
 
       {errorMessage ? (
-        <View
-          style={[
-            styles.messageBox,
-            testingDare === 'success'
-              ? styles.successBox
-              : styles.errorBox,
-          ]}
-        >
-          <Text
-            style={[
-              styles.messageText,
-              testingDare === 'success'
-                ? styles.successText
-                : styles.errorText,
-            ]}
-          >
-            {errorMessage}
-          </Text>
-
-          {testingDare !== 'success' ? (
-            <Pressable onPress={loadProfile}>
-              <Text style={styles.retryText}>
-                TRY AGAIN
-              </Text>
-            </Pressable>
-          ) : null}
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{errorMessage}</Text>
+          <Pressable onPress={loadProfile}>
+            <Text style={styles.retryText}>TRY AGAIN</Text>
+          </Pressable>
         </View>
       ) : null}
 
-      <SectionHeader title="Badges" />
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Your Posts</Text>
+        <Text style={styles.sectionCount}>{posts.length}</Text>
+      </View>
 
-      <EmptyState
-        title="No badges yet"
-        description="Complete dares to start earning badges."
-      />
-
-      <SectionHeader title="Completed Dares" />
-
-      <EmptyState
-        title="No completed dares yet"
-        description="Your finished dares will show up here."
-      />
-
-      {/* TEMPORARY PHASE 6 QA BUTTON */}
-      <Pressable
-        style={({ pressed }) => [
-          styles.testButton,
-          pressed && styles.testButtonPressed,
-          testingDare === 'testing' &&
-            styles.testButtonDisabled,
-        ]}
-        onPress={handleTestDareTransition}
-        disabled={testingDare === 'testing'}
-      >
-        {testingDare === 'testing' ? (
-          <ActivityIndicator
-            color={colors.accent}
-          />
-        ) : (
-          <Text style={styles.testButtonText}>
-            TEST DARE ENGINE
+      {postsLoading ? (
+        <View style={styles.postsLoading}>
+          <ActivityIndicator color={colors.accent} />
+          <Text style={styles.loadingText}>Loading posts...</Text>
+        </View>
+      ) : posts.length === 0 ? (
+        <View style={styles.emptyPosts}>
+          <Text style={styles.emptyTitle}>No posts yet</Text>
+          <Text style={styles.emptyDescription}>
+            Share your first post with the DareMe community.
           </Text>
-        )}
-      </Pressable>
+
+          <Pressable
+            style={styles.createPostButton}
+            onPress={() => router.push('/create-post' as any)}
+          >
+            <Text style={styles.createPostText}>CREATE POST</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <View style={styles.postGrid}>
+          {posts.map((post) => {
+            const isImage =
+              post.media_type === 'image' &&
+              !!post.signedMediaUrl;
+
+            return (
+              <View key={post.id} style={styles.postTile}>
+                {isImage ? (
+                  <Image
+                    source={{ uri: post.signedMediaUrl! }}
+                    style={styles.postTileImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.textPostTile}>
+                    <Text
+                      style={styles.textPostContent}
+                      numberOfLines={7}
+                    >
+                      {post.content || 'Shared a post'}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
 
       <Pressable
         style={({ pressed }) => [
@@ -454,13 +452,9 @@ export default function MeScreen() {
         disabled={loggingOut}
       >
         {loggingOut ? (
-          <ActivityIndicator
-            color={colors.primaryText}
-          />
+          <ActivityIndicator color={colors.primaryText} />
         ) : (
-          <Text style={styles.logoutText}>
-            LOG OUT
-          </Text>
+          <Text style={styles.logoutText}>LOG OUT</Text>
         )}
       </Pressable>
     </Screen>
@@ -476,13 +470,8 @@ function Stat({
 }) {
   return (
     <View style={styles.stat}>
-      <Text style={styles.statValue}>
-        {value}
-      </Text>
-
-      <Text style={styles.statLabel}>
-        {label}
-      </Text>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
 }
@@ -512,6 +501,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
+    flex: 1,
+  },
+
+  identityText: {
+    flexShrink: 1,
   },
 
   avatarButton: {
@@ -566,11 +560,27 @@ const styles = StyleSheet.create({
     color: colors.secondaryText,
     fontFamily: fontFamily.body,
     fontSize: fontSize.sm,
+    marginTop: 2,
   },
 
-  statRow: {
+  settingsIcon: {
+    color: colors.primaryText,
+    fontSize: 20,
+  },
+
+  followStats: {
     flexDirection: 'row',
     marginTop: spacing.xl,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.lg,
+  },
+
+  gameStats: {
+    flexDirection: 'row',
+    marginTop: spacing.md,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
@@ -597,41 +607,21 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
 
-  settingsIcon: {
-    color: colors.primaryText,
-    fontSize: 20,
-  },
-
-  messageBox: {
+  errorBox: {
     marginTop: spacing.lg,
     borderRadius: radius.md,
     borderWidth: 1,
+    borderColor: colors.danger,
+    backgroundColor: '#2A1518',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     gap: spacing.sm,
   },
 
-  errorBox: {
-    backgroundColor: '#2A1518',
-    borderColor: colors.danger,
-  },
-
-  successBox: {
-    backgroundColor: '#12251A',
-    borderColor: colors.success,
-  },
-
-  messageText: {
-    fontFamily: fontFamily.body,
-    fontSize: fontSize.sm,
-  },
-
   errorText: {
     color: '#FF7A84',
-  },
-
-  successText: {
-    color: colors.success,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.sm,
   },
 
   retryText: {
@@ -640,29 +630,107 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
   },
 
-  testButton: {
-    minHeight: 52,
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginTop: spacing.xl,
+    marginBottom: spacing.md,
+  },
+
+  sectionTitle: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.headingMedium,
+    fontSize: fontSize.lg,
+  },
+
+  sectionCount: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.sm,
+  },
+
+  postsLoading: {
+    minHeight: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md,
+  },
+
+  emptyPosts: {
+    minHeight: 220,
     borderRadius: radius.lg,
     borderWidth: 1,
-    borderColor: colors.accent,
+    borderColor: colors.border,
     backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+
+  emptyTitle: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.headingMedium,
+    fontSize: fontSize.lg,
+  },
+
+  emptyDescription: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.sm,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    maxWidth: 280,
+  },
+
+  createPostButton: {
+    marginTop: spacing.lg,
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
-  testButtonPressed: {
-    opacity: 0.7,
-  },
-
-  testButtonDisabled: {
-    opacity: 0.6,
-  },
-
-  testButtonText: {
-    color: colors.accent,
+  createPostText: {
+    color: colors.background,
     fontFamily: fontFamily.headingBold,
     fontSize: fontSize.sm,
+  },
+
+  postGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+
+  postTile: {
+    width: '31.8%',
+    aspectRatio: 1,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+
+  postTileImage: {
+    width: '100%',
+    height: '100%',
+  },
+
+  textPostTile: {
+    flex: 1,
+    padding: spacing.sm,
+    justifyContent: 'center',
+  },
+
+  textPostContent: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.xs,
+    lineHeight: 16,
   },
 
   logoutButton: {
