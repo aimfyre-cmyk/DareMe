@@ -1,21 +1,21 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { Chip } from '../components/Chip';
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    radius,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
 } from '../constants/theme';
 import { transitionDare } from '../lib/dareTransitions';
 import { supabase } from '../lib/supabase';
@@ -79,7 +79,6 @@ export default function DareDetailScreen() {
   }, [id]);
 
   const goToDares = () => {
-    console.log('[DareDetail] Going to Dares tab');
     router.replace('/(tabs)/dares');
   };
 
@@ -98,14 +97,9 @@ export default function DareDetailScreen() {
         error: userError,
       } = await supabase.auth.getUser();
 
-      console.log('[DareDetail] Current user:', user?.id);
-      console.log('[DareDetail] Auth error:', userError);
-
       if (userError || !user) {
         throw new Error('Please log in before taking a dare.');
       }
-
-      console.log('[DareDetail] Checking participant...');
 
       const {
         data: existingParticipant,
@@ -117,21 +111,12 @@ export default function DareDetailScreen() {
         .eq('user_id', user.id)
         .maybeSingle();
 
-      console.log(
-        '[DareDetail] Participant query finished:',
-        existingParticipant,
-        existingError,
-      );
-
       if (existingError) {
         throw existingError;
       }
 
-      let participantId: string;
+      let participantId: string | null = null;
 
-      /*
-       * USER ALREADY HAS THIS DARE
-       */
       if (existingParticipant) {
         participantId = existingParticipant.id;
 
@@ -140,44 +125,23 @@ export default function DareDetailScreen() {
           existingParticipant.state,
         );
 
-        /*
-         * Already accepted / active:
-         * directly open Active Dares.
-         */
         if (
-          existingParticipant.state === 'ACCEPTED' ||
           existingParticipant.state === 'IN_PROGRESS' ||
           existingParticipant.state === 'SUBMITTED' ||
           existingParticipant.state === 'VERIFIED'
         ) {
-          console.log(
-            '[DareDetail] Dare already active. Opening Dares.',
-          );
-
           goToDares();
           return;
         }
 
-        /*
-         * SENT means it still needs acceptance.
-         */
         if (existingParticipant.state !== 'SENT') {
-          console.log(
-            '[DareDetail] Dare unavailable:',
-            existingParticipant.state,
+          throw new Error(
+            `This dare is currently ${existingParticipant.state}.`,
           );
-
-          setTakingDare(false);
-          return;
         }
       }
 
-      /*
-       * CREATE PARTICIPANT
-       */
       if (!existingParticipant) {
-        console.log('[DareDetail] Creating participant...');
-
         const {
           data: participant,
           error: participantError,
@@ -199,48 +163,39 @@ export default function DareDetailScreen() {
         }
 
         participantId = participant.id;
+      }
 
-        console.log(
-          '[DareDetail] Participant created:',
-          participantId,
+      if (!participantId) {
+        throw new Error(
+          'Dare participant could not be created.',
         );
       }
 
-      /*
-       * ACCEPT DARE
-       */
       console.log(
         '[DareDetail] Accepting participant:',
         participantId,
       );
 
-      const result = await transitionDare(
+      const acceptResult = await transitionDare(
         participantId,
         'accept',
       );
 
-      console.log(
-        '[DareDetail] Accept result:',
-        result,
-      );
-
-      if (!result?.success) {
+      if (!acceptResult.success) {
         throw new Error(
-          result?.error || 'Could not accept the dare.',
+          acceptResult.error ||
+            'Could not accept the dare.',
         );
       }
 
-      if (result.state !== 'ACCEPTED') {
+      if (acceptResult.state !== 'ACCEPTED') {
         throw new Error(
-          `Unexpected dare state: ${result.state}`,
+          `Unexpected dare state: ${acceptResult.state}`,
         );
       }
 
-      /*
-       * SUCCESS
-       */
       console.log(
-        '[DareDetail] DARE ACCEPTED SUCCESSFULLY',
+        '[DareDetail] Dare accepted successfully.',
       );
 
       goToDares();

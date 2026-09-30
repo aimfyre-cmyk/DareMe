@@ -21,6 +21,8 @@ type DareCardProps = {
   dare: MockDare;
   onPress?: () => void;
   onPrimaryAction?: () => void;
+  loading?: boolean;
+  inProgress?: boolean;
 };
 
 const difficultyVariant: Record<
@@ -36,17 +38,28 @@ export function DareCard({
   dare,
   onPress,
   onPrimaryAction,
+  loading = false,
+  inProgress = false,
 }: DareCardProps) {
   const handlePrimaryPress = () => {
-    console.log('[DareCard] TAKE THE DARE:', dare.id);
+  if (loading) {
+    return;
+  }
 
-    if (onPrimaryAction) {
-      onPrimaryAction();
-      return;
-    }
-
+  if (inProgress) {
     onPress?.();
-  };
+    return;
+  }
+
+  console.log('[DareCard] TAKE THE DARE:', dare.id);
+
+  if (onPrimaryAction) {
+    onPrimaryAction();
+    return;
+  }
+
+  onPress?.();
+};
 
   return (
     <View style={styles.card}>
@@ -86,6 +99,7 @@ export function DareCard({
       {/* CTA */}
       <Pressable
         onPress={handlePrimaryPress}
+        disabled={loading}
         accessibilityRole="button"
         accessibilityLabel={`Take the dare: ${dare.title}`}
         testID={`take-dare-${dare.id}`}
@@ -95,8 +109,11 @@ export function DareCard({
         ]}
       >
         <Text style={styles.ctaLabel}>
-          ⚡ TAKE THE DARE
-        </Text>
+{loading
+  ? 'Starting Dare...'
+  : inProgress
+    ? '🔥 IN PROGRESS'
+    : '⚡ TAKE THE DARE'}</Text>
       </Pressable>
     </View>
   );

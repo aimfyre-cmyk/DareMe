@@ -1,40 +1,200 @@
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+
+import { router } from 'expo-router';
+
 import { Chip } from '../../components/Chip';
 import { Input } from '../../components/Input';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
-import { colors, fontFamily, fontSize, spacing } from '../../constants/theme';
+
+import {
+  colors,
+  fontFamily,
+  fontSize,
+  spacing,
+} from '../../constants/theme';
+
 import { discoverCategories } from '../../data/mockDares';
+import { supabase } from '../../lib/supabase';
 
 const difficulties = ['Easy', 'Medium', 'Hard'] as const;
-const visibilities = ['Anyone', 'Followers', 'Connections'] as const;
 
-/**
- * CREATE — Phase 2 shell only. UI ONLY: no persistence, no API calls,
- * no AI generation. Selections are local component state so the screen
- * feels real, but nothing here survives navigating away. Real dare
- * creation (validation, safety check, publish) arrives in Phase 6.
- */
+const visibilities = [
+  'Anyone',
+  'Followers',
+  'Connections',
+] as const;
+
 export default function CreateScreen() {
+  const [title, setTitle] = useState('');
   const [category, setCategory] = useState<string | null>(null);
-  const [difficulty, setDifficulty] = useState<(typeof difficulties)[number] | null>(null);
-  const [visibility, setVisibility] = useState<(typeof visibilities)[number] | null>(null);
+
+  const [difficulty, setDifficulty] = useState<
+    (typeof difficulties)[number] | null
+  >(null);
+
+  const [visibility, setVisibility] = useState<
+    (typeof visibilities)[number] | null
+  >(null);
+
+  const [publishing, setPublishing] = useState(false);
+
+  const handlePublishDare = async () => {
+    if (publishing) {
+      return;
+    }
+
+    const trimmedTitle = title.trim();
+
+    if (!trimmedTitle) {
+      Alert.alert(
+        'Dare required',
+        'Please describe your dare first.',
+      );
+      return;
+    }
+
+    if (!category) {
+      Alert.alert(
+        'Category required',
+        'Please select a category.',
+      );
+      return;
+    }
+
+    if (!difficulty) {
+      Alert.alert(
+        'Difficulty required',
+        'Please select a difficulty.',
+      );
+      return;
+    }
+
+    if (!visibility) {
+      Alert.alert(
+        'Visibility required',
+        'Please select who can see this dare.',
+      );
+      return;
+    }
+
+    setPublishing(true);
+
+    try {
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        throw new Error(
+          'Please log in before publishing a dare.',
+        );
+      }
+
+      const dbVisibility =
+        visibility === 'Anyone'
+          ? 'anyone'
+          : visibility === 'Followers'
+            ? 'followers'
+            : 'connections';
+
+      const dbDifficulty =
+        difficulty.toLowerCase();
+
+      const { data, error } = await supabase
+        .from('dares')
+        .insert({
+          creator_id: user.id,
+          type: 'p2p',
+          title: trimmedTitle,
+          description: trimmedTitle,
+          category,
+          difficulty: dbDifficulty,
+          time_limit_minutes: 60,
+          proof_type: 'text',
+          visibility: dbVisibility,
+          xp_value: 20,
+          status: 'active',
+        })
+        .select('id')
+        .single();
+
+      if (error || !data) {
+        throw (
+          error ??
+          new Error('Could not publish the dare.')
+        );
+      }
+
+      console.log(
+        '[CreateDare] Published:',
+        data.id,
+      );
+
+      Alert.alert(
+        '⚡ Dare Published!',
+        'Your dare is now live.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              router.replace('/');
+            },
+          },
+        ],
+      );
+    } catch (error) {
+      console.error(
+        '[CreateDare] Publish error:',
+        error,
+      );
+
+      Alert.alert(
+        'Could not publish dare',
+        error instanceof Error
+          ? error.message
+          : 'Something went wrong while publishing.',
+      );
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   return (
     <Screen>
-      <Text style={styles.heading} accessibilityRole="header">
+      <Text
+        style={styles.heading}
+        accessibilityRole="header"
+      >
         Create a Dare
       </Text>
+
       <Text style={styles.subheading}>
-        This screen is a preview — publishing isn&apos;t connected yet.
+        Create a challenge and publish it to DareMe.
       </Text>
 
       <SectionHeader title="What's the dare?" />
-      <Input placeholder="Describe the dare..." multiline numberOfLines={4} />
+
+      <Input
+        placeholder="Describe the dare..."
+        multiline
+        numberOfLines={4}
+        value={title}
+        onChangeText={setTitle}
+      />
 
       <SectionHeader title="Category" />
+
       <View style={styles.chipWrap}>
         {discoverCategories.map((item) => (
           <SelectableChip
@@ -47,6 +207,7 @@ export default function CreateScreen() {
       </View>
 
       <SectionHeader title="Difficulty" />
+
       <View style={styles.chipWrap}>
         {difficulties.map((item) => (
           <SelectableChip
@@ -59,6 +220,7 @@ export default function CreateScreen() {
       </View>
 
       <SectionHeader title="Who can see this" />
+
       <View style={styles.chipWrap}>
         {visibilities.map((item) => (
           <SelectableChip
@@ -71,8 +233,26 @@ export default function CreateScreen() {
       </View>
 
       <View style={styles.ctaWrap}>
-        <PrimaryButton label="Publish Dare" disabled />
-        <Text style={styles.disabledNote}>Publishing arrives in a later phase.</Text>
+        <PrimaryButton
+          label={
+            publishing
+              ? 'Publishing...'
+              : 'Publish Dare'
+          }
+          onPress={handlePublishDare}
+          disabled={publishing}
+        />
+
+        {publishing ? (
+          <ActivityIndicator
+            size="small"
+            color={colors.accent}
+          />
+        ) : (
+          <Text style={styles.note}>
+            Your dare will appear on Home.
+          </Text>
+        )}
       </View>
     </Screen>
   );
@@ -94,7 +274,12 @@ function SelectableChip({
       accessibilityLabel={label}
       accessibilityState={{ selected }}
     >
-      <Chip label={label} variant={selected ? 'accent' : 'neutral'} />
+      <Chip
+        label={label}
+        variant={
+          selected ? 'accent' : 'neutral'
+        }
+      />
     </Pressable>
   );
 }
@@ -106,6 +291,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xxl,
     marginTop: spacing.lg,
   },
+
   subheading: {
     color: colors.secondaryText,
     fontFamily: fontFamily.body,
@@ -113,17 +299,20 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     marginBottom: spacing.sm,
   },
+
   chipWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
   },
+
   ctaWrap: {
     marginTop: spacing.xxl,
     alignItems: 'center',
     gap: spacing.sm,
   },
-  disabledNote: {
+
+  note: {
     color: colors.secondaryText,
     fontFamily: fontFamily.body,
     fontSize: fontSize.xs,

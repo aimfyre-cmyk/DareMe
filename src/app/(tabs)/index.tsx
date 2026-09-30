@@ -16,6 +16,7 @@ import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
 
 import { colors, fontSize, spacing } from '../../constants/theme';
+import { transitionDare } from '../../lib/dareTransitions';
 import { supabase } from '../../lib/supabase';
 
 type DareRow = {
@@ -62,6 +63,10 @@ export default function HomeScreen() {
   const [dares, setDares] = useState<MockDare[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [takingDare, setTakingDare] = useState<string | null>(null);
+  const [inProgressDares, setInProgressDares] = useState<
+  Set<string>
+>(new Set());
 
   const loadDares = useCallback(async () => {
     try {
@@ -103,10 +108,162 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-    loadDares();
-  }, [loadDares]);
+  loadDares();
+}, [loadDares]);
+useEffect(() => {
+  loadDares();
+}, [loadDares]);
+
+useEffect(() => {
+  const loadInProgressDares = async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setInProgressDares(new Set());
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('dare_participants')
+        .select('dare_id')
+        .eq('user_id', user.id)
+        .eq('state', 'IN_PROGRESS');
+
+      if (error) {
+        throw error;
+      }
+
+      setInProgressDares(
+        new Set(
+          (data ?? []).map(
+            (participant) => participant.dare_id,
+          ),
+        ),
+      );
+    } catch (error) {
+      console.error(
+        '[Home] Failed to load in-progress dares:',
+        error,
+      );
+
+      setInProgressDares(new Set());
+    }
+  };
+
+  loadInProgressDares();
+}, []);
 
   const hasDares = dares.length > 0;
+  const handleTakeDare = async (dareId: string) => {
+  console.log('[Home] TAKE THE DARE:', dareId);
+  setTakingDare(dareId);
+
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      throw new Error('Please log in before taking a dare.');
+    }
+
+    const { data: existingParticipant, error: existingError } =
+      await supabase
+        .from('dare_participants')
+        .select('id,state')
+        .eq('dare_id', dareId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+    if (existingError) {
+      throw existingError;
+    }
+    console.log(
+  '[Home] EXISTING PARTICIPANT:',
+  existingParticipant,
+);
+
+    let participantId: string;
+
+    if (existingParticipant) {
+      participantId = existingParticipant.id;
+
+      if (existingParticipant.state === 'IN_PROGRESS') {
+        return;
+      }
+
+      if (
+        existingParticipant.state !== 'SENT' &&
+        existingParticipant.state !== 'ACCEPTED'
+      ) {
+        throw new Error(
+          `This dare is currently ${existingParticipant.state}.`,
+        );
+      }
+    } else {
+      const { data: participant, error: participantError } =
+        await supabase
+          .from('dare_participants')
+          .insert({
+            dare_id: dareId,
+            user_id: user.id,
+            state: 'SENT',
+          })
+          .select('id')
+          .single();
+
+      if (participantError || !participant) {
+        throw (
+          participantError ??
+          new Error('Could not create dare participant.')
+        );
+      }
+
+      participantId = participant.id;
+    }
+
+    if (existingParticipant?.state !== 'ACCEPTED') {
+      const acceptResult = await transitionDare(
+        participantId,
+        'accept',
+      );
+
+      if (acceptResult.state !== 'ACCEPTED') {
+        throw new Error(
+          `Unexpected state: ${acceptResult.state}`,
+        );
+      }
+    }
+
+    const startResult = await transitionDare(
+      participantId,
+      'start',
+    );
+
+    if (startResult.state !== 'IN_PROGRESS') {
+      throw new Error(
+        `Unexpected state: ${startResult.state}`,
+      );
+    }
+
+    console.log('[Home] DARE STARTED:', participantId);
+    setInProgressDares((current) => {
+  const next = new Set(current);
+  next.add(dareId);
+  return next;
+});
+  } catch  (error) {
+    
+    console.error('[Home] Take dare error:', error);
+  }
+  finally {
+  setTakingDare(null);
+}
+};
 
   return (
     <Screen>
@@ -177,6 +334,8 @@ export default function HomeScreen() {
             <DareCard
               key={dare.id}
               dare={dare}
+              loading={takingDare === dare.id}
+              inProgress={inProgressDares.has(dare.id)}
               onPress={() => {
                 router.push({
                   pathname: '/dare-detail',
@@ -186,12 +345,7 @@ export default function HomeScreen() {
                 });
               }}
               onPrimaryAction={() => {
-  router.push({
-    pathname: '/dare-detail',
-    params: {
-      id: dare.id,
-    },
-  });
+  handleTakeDare(dare.id);
 }}
             />
           ))}
