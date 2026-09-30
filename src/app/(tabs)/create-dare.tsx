@@ -34,6 +34,12 @@ const visibilities = [
   'Connections',
 ] as const;
 
+const proofTypes = [
+  'Text',
+  'Photo / Post',
+  'Video',
+] as const;
+
 export default function CreateScreen() {
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState<string | null>(null);
@@ -44,6 +50,10 @@ export default function CreateScreen() {
 
   const [visibility, setVisibility] = useState<
     (typeof visibilities)[number] | null
+  >(null);
+
+  const [proofType, setProofType] = useState<
+    (typeof proofTypes)[number] | null
   >(null);
 
   const [publishing, setPublishing] = useState(false);
@@ -87,6 +97,14 @@ export default function CreateScreen() {
       return;
     }
 
+    if (!proofType) {
+      Alert.alert(
+        'Proof required',
+        'Please select how the dare must be proved.',
+      );
+      return;
+    }
+
     setPublishing(true);
 
     try {
@@ -108,8 +126,14 @@ export default function CreateScreen() {
             ? 'followers'
             : 'connections';
 
-      const dbDifficulty =
-        difficulty.toLowerCase();
+      const dbDifficulty = difficulty.toLowerCase();
+
+      const dbProofType =
+        proofType === 'Text'
+          ? 'text'
+          : proofType === 'Photo / Post'
+            ? 'photo'
+            : 'video';
 
       const { data, error } = await supabase
         .from('dares')
@@ -121,7 +145,7 @@ export default function CreateScreen() {
           category,
           difficulty: dbDifficulty,
           time_limit_minutes: 60,
-          proof_type: 'text',
+          proof_type: dbProofType,
           visibility: dbVisibility,
           xp_value: 20,
           status: 'active',
@@ -141,18 +165,7 @@ export default function CreateScreen() {
         data.id,
       );
 
-      Alert.alert(
-        '⚡ Dare Published!',
-        'Your dare is now live.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              router.replace('/');
-            },
-          },
-        ],
-      );
+      router.replace('/');
     } catch (error) {
       console.error(
         '[CreateDare] Publish error:',
@@ -215,6 +228,23 @@ export default function CreateScreen() {
             label={item}
             selected={difficulty === item}
             onPress={() => setDifficulty(item)}
+          />
+        ))}
+      </View>
+
+      <SectionHeader title="Proof Required" />
+
+      <Text style={styles.helperText}>
+        Choose how the person completing this dare must prove it.
+      </Text>
+
+      <View style={styles.chipWrap}>
+        {proofTypes.map((item) => (
+          <SelectableChip
+            key={item}
+            label={item}
+            selected={proofType === item}
+            onPress={() => setProofType(item)}
           />
         ))}
       </View>
@@ -297,6 +327,13 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.body,
     fontSize: fontSize.sm,
     marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+
+  helperText: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.xs,
     marginBottom: spacing.sm,
   },
 

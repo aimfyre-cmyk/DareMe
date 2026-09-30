@@ -1,5 +1,10 @@
-import { useFocusEffect } from 'expo-router';
+import {
+  router,
+  useFocusEffect,
+} from 'expo-router';
+
 import { useCallback, useState } from 'react';
+
 import {
   ActivityIndicator,
   Alert,
@@ -18,6 +23,7 @@ import {
   radius,
   spacing,
 } from '../../constants/theme';
+
 import { transitionDare } from '../../lib/dareTransitions';
 import { supabase } from '../../lib/supabase';
 
@@ -70,7 +76,8 @@ export default function DaresScreen() {
   const [completedDares, setCompletedDares] =
     useState<CompletedDare[]>([]);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] =
+    useState(true);
 
   const [completedLoading, setCompletedLoading] =
     useState(false);
@@ -87,122 +94,18 @@ export default function DaresScreen() {
   const [completingId, setCompletingId] =
     useState<string | null>(null);
 
+  const [selectedDareId, setSelectedDareId] =
+    useState<string | null>(null);
+
   const [proofText, setProofText] =
     useState<Record<string, string>>({});
 
   /*
-   * ACTIVE DARES
+   * LOAD ACTIVE DARES
    */
-  const loadActiveDares = useCallback(async () => {
-    setLoading(true);
-
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      if (!user) {
-        setActiveDares([]);
-        return;
-      }
-
-      const {
-        data: participants,
-        error: participantError,
-      } = await supabase
-        .from('dare_participants')
-        .select('id, dare_id, state')
-        .eq('user_id', user.id)
-        .in('state', [
-          'ACCEPTED',
-          'IN_PROGRESS',
-          'SUBMITTED',
-          'VERIFIED',
-        ])
-        .order('id', { ascending: false });
-
-      if (participantError) {
-        throw participantError;
-      }
-
-      if (!participants || participants.length === 0) {
-        setActiveDares([]);
-        return;
-      }
-
-      const dareIds = [
-        ...new Set(
-          participants.map(
-            (participant) => participant.dare_id,
-          ),
-        ),
-      ];
-
-      const {
-        data: dares,
-        error: dareError,
-      } = await supabase
-        .from('dares')
-        .select(
-          'id,title,description,category,difficulty,xp_value,proof_type,time_limit_minutes',
-        )
-        .in('id', dareIds);
-
-      if (dareError) {
-        throw dareError;
-      }
-
-      const dareMap = new Map(
-        (dares ?? []).map((dare) => [
-          dare.id,
-          dare,
-        ]),
-      );
-
-      const combined = participants
-        .map((participant) => {
-          const dare = dareMap.get(
-            participant.dare_id,
-          );
-
-          if (!dare) {
-            return null;
-          }
-
-          return {
-            id: participant.id,
-            dare_id: participant.dare_id,
-            state: participant.state,
-            dare,
-          };
-        })
-        .filter(
-          (item): item is ActiveDare =>
-            item !== null,
-        );
-
-      setActiveDares(combined);
-    } catch (error) {
-      console.error(
-        '[Dares] Failed to load active dares:',
-        error,
-      );
-
-      Alert.alert(
-        'Could not load dares',
-        'Please try again.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  /*
-   * COMPLETED DARES
-   */
-  const loadCompletedDares = useCallback(
+  const loadActiveDares = useCallback(
     async () => {
-      setCompletedLoading(true);
+      setLoading(true);
 
       try {
         const {
@@ -210,7 +113,8 @@ export default function DaresScreen() {
         } = await supabase.auth.getUser();
 
         if (!user) {
-          setCompletedDares([]);
+          setActiveDares([]);
+          setSelectedDareId(null);
           return;
         }
 
@@ -219,12 +123,15 @@ export default function DaresScreen() {
           error: participantError,
         } = await supabase
           .from('dare_participants')
-          .select(
-            'id,dare_id,state,completed_at',
-          )
+          .select('id, dare_id, state')
           .eq('user_id', user.id)
-          .eq('state', 'COMPLETED')
-          .order('completed_at', {
+          .in('state', [
+            'ACCEPTED',
+            'IN_PROGRESS',
+            'SUBMITTED',
+            'VERIFIED',
+          ])
+          .order('id', {
             ascending: false,
           });
 
@@ -236,7 +143,8 @@ export default function DaresScreen() {
           !participants ||
           participants.length === 0
         ) {
-          setCompletedDares([]);
+          setActiveDares([]);
+          setSelectedDareId(null);
           return;
         }
 
@@ -284,40 +192,170 @@ export default function DaresScreen() {
               id: participant.id,
               dare_id: participant.dare_id,
               state: participant.state,
-              completed_at:
-                participant.completed_at,
               dare,
             };
           })
           .filter(
-            (
-              item,
-            ): item is CompletedDare =>
+            (item): item is ActiveDare =>
               item !== null,
           );
 
-        setCompletedDares(combined);
+        setActiveDares(combined);
 
-        console.log(
-          '[Dares] Completed dares loaded:',
-          combined.length,
-        );
+        setSelectedDareId((current) => {
+          if (
+            current &&
+            combined.some(
+              (item) =>
+                item.id === current,
+            )
+          ) {
+            return current;
+          }
+
+          const inProgress =
+            combined.find(
+              (item) =>
+                item.state ===
+                'IN_PROGRESS',
+            );
+
+          return inProgress?.id ?? null;
+        });
       } catch (error) {
         console.error(
-          '[Dares] Failed to load completed dares:',
+          '[Dares] Failed to load active dares:',
           error,
         );
 
         Alert.alert(
-          'Could not load completed dares',
+          'Could not load dares',
           'Please try again.',
         );
       } finally {
-        setCompletedLoading(false);
+        setLoading(false);
       }
     },
     [],
   );
+
+  /*
+   * LOAD COMPLETED DARES
+   */
+  const loadCompletedDares =
+    useCallback(
+      async () => {
+        setCompletedLoading(true);
+
+        try {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+
+          if (!user) {
+            setCompletedDares([]);
+            return;
+          }
+
+          const {
+            data: participants,
+            error: participantError,
+          } = await supabase
+            .from('dare_participants')
+            .select(
+              'id,dare_id,state,completed_at',
+            )
+            .eq('user_id', user.id)
+            .eq('state', 'COMPLETED')
+            .order('completed_at', {
+              ascending: false,
+            });
+
+          if (participantError) {
+            throw participantError;
+          }
+
+          if (
+            !participants ||
+            participants.length === 0
+          ) {
+            setCompletedDares([]);
+            return;
+          }
+
+          const dareIds = [
+            ...new Set(
+              participants.map(
+                (participant) =>
+                  participant.dare_id,
+              ),
+            ),
+          ];
+
+          const {
+            data: dares,
+            error: dareError,
+          } = await supabase
+            .from('dares')
+            .select(
+              'id,title,description,category,difficulty,xp_value,proof_type,time_limit_minutes',
+            )
+            .in('id', dareIds);
+
+          if (dareError) {
+            throw dareError;
+          }
+
+          const dareMap = new Map(
+            (dares ?? []).map((dare) => [
+              dare.id,
+              dare,
+            ]),
+          );
+
+          const combined = participants
+            .map((participant) => {
+              const dare = dareMap.get(
+                participant.dare_id,
+              );
+
+              if (!dare) {
+                return null;
+              }
+
+              return {
+                id: participant.id,
+                dare_id: participant.dare_id,
+                state: participant.state,
+                completed_at:
+                  participant.completed_at,
+                dare,
+              };
+            })
+            .filter(
+              (
+                item,
+              ): item is CompletedDare =>
+                item !== null,
+            );
+
+          setCompletedDares(combined);
+        } catch (error) {
+          console.error(
+            '[Dares] Failed to load completed dares:',
+            error,
+          );
+
+          Alert.alert(
+            'Could not load completed dares',
+            'Please try again.',
+          );
+        } finally {
+          setCompletedLoading(false);
+        }
+      },
+      [],
+    );
 
   /*
    * REFRESH WHEN SCREEN GETS FOCUS
@@ -355,11 +393,6 @@ export default function DaresScreen() {
         'start',
       );
 
-      console.log(
-        '[Dares] Start result:',
-        result,
-      );
-
       if (result.state !== 'IN_PROGRESS') {
         throw new Error(
           `Unexpected state: ${result.state}`,
@@ -376,6 +409,8 @@ export default function DaresScreen() {
             : item,
         ),
       );
+
+      setSelectedDareId(participantId);
 
       Alert.alert(
         'Dare Started ⚡',
@@ -435,22 +470,15 @@ export default function DaresScreen() {
     setSubmittingId(participantId);
 
     try {
-      console.log(
-        '[Dares] Saving text proof:',
-        {
-          participantId,
-          text,
-        },
-      );
-
-      const { error: proofError } =
-        await supabase
-          .from('dare_proofs')
-          .insert({
-            participant_id: participantId,
-            type: 'text',
-            text_content: text,
-          });
+      const {
+        error: proofError,
+      } = await supabase
+        .from('dare_proofs')
+        .insert({
+          participant_id: participantId,
+          type: 'text',
+          text_content: text,
+        });
 
       if (proofError) {
         throw proofError;
@@ -459,11 +487,6 @@ export default function DaresScreen() {
       const result = await transitionDare(
         participantId,
         'submit',
-      );
-
-      console.log(
-        '[Dares] Submit result:',
-        result,
       );
 
       if (result.state !== 'SUBMITTED') {
@@ -505,11 +528,44 @@ export default function DaresScreen() {
   };
 
   /*
+   * CREATE DARE PROOF
+   *
+   * Photo/Post:
+   *   /create-post
+   *   dareParticipantId
+   *   dareProofType=photo
+   *
+   * Video:
+   *   /create-post
+   *   dareParticipantId
+   *   dareProofType=video
+   */
+  const handleCreateProof = (
+    participantId: string,
+    proofType: 'photo' | 'video',
+  ) => {
+    if (
+      submittingId ||
+      startingId ||
+      verifyingId ||
+      completingId
+    ) {
+      return;
+    }
+
+    router.push({
+      pathname: '/create-post',
+      params: {
+        dareParticipantId: participantId,
+        dareProofType: proofType,
+      },
+    });
+  };
+
+  /*
    * VERIFY PROOF
    *
-   * DEV/TEST ONLY.
-   * Production mein verification AI/moderation
-   * pipeline se hona chahiye.
+   * DEV / TEST FLOW
    */
   const handleVerifyDare = async (
     participantId: string,
@@ -526,19 +582,9 @@ export default function DaresScreen() {
     setVerifyingId(participantId);
 
     try {
-      console.log(
-        '[Dares] Verifying proof:',
-        participantId,
-      );
-
       const result = await transitionDare(
         participantId,
         'verify',
-      );
-
-      console.log(
-        '[Dares] Verify result:',
-        result,
       );
 
       if (result.state !== 'VERIFIED') {
@@ -560,7 +606,7 @@ export default function DaresScreen() {
 
       Alert.alert(
         'Proof Verified ✓',
-        'Proof verified successfully. You can now complete the dare.',
+        'Proof verified successfully.',
       );
     } catch (error) {
       console.error(
@@ -597,19 +643,9 @@ export default function DaresScreen() {
     setCompletingId(participantId);
 
     try {
-      console.log(
-        '[Dares] Completing dare:',
-        participantId,
-      );
-
       const result = await transitionDare(
         participantId,
         'complete',
-      );
-
-      console.log(
-        '[Dares] Complete result:',
-        result,
       );
 
       if (result.state !== 'COMPLETED') {
@@ -618,7 +654,6 @@ export default function DaresScreen() {
         );
       }
 
-      // Remove from Active immediately.
       setActiveDares((current) =>
         current.filter(
           (item) =>
@@ -626,7 +661,12 @@ export default function DaresScreen() {
         ),
       );
 
-      // Refresh Completed tab from DB.
+      if (
+        selectedDareId === participantId
+      ) {
+        setSelectedDareId(null);
+      }
+
       await loadCompletedDares();
 
       Alert.alert(
@@ -656,6 +696,9 @@ export default function DaresScreen() {
   const renderActiveDare = (
     item: ActiveDare,
   ) => {
+    const isSelected =
+      selectedDareId === item.id;
+
     const isStarting =
       startingId === item.id;
 
@@ -668,13 +711,24 @@ export default function DaresScreen() {
     const isCompleting =
       completingId === item.id;
 
+    const proofType =
+      item.dare.proof_type
+        .toLowerCase()
+        .trim();
+
     const canStart =
       item.state === 'ACCEPTED';
 
-    const canSubmit =
+    const canSubmitText =
       item.state === 'IN_PROGRESS' &&
-      item.dare.proof_type.toLowerCase() ===
-        'text';
+      proofType === 'text' &&
+      isSelected;
+
+    const isPhotoProof =
+      proofType === 'photo';
+
+    const isVideoProof =
+      proofType === 'video';
 
     const currentProof =
       proofText[item.id] ?? '';
@@ -682,57 +736,100 @@ export default function DaresScreen() {
     return (
       <View
         key={item.id}
-        style={styles.card}
+        style={[
+          styles.card,
+          isSelected &&
+            styles.cardSelected,
+        ]}
       >
-        <View style={styles.topRow}>
-          <Text style={styles.category}>
-            {item.dare.category.toUpperCase()}
+        <Pressable
+          onPress={() => {
+            if (
+              item.state ===
+                'IN_PROGRESS' ||
+              item.state ===
+                'SUBMITTED' ||
+              item.state ===
+                'VERIFIED'
+            ) {
+              setSelectedDareId(
+                item.id,
+              );
+            }
+          }}
+        >
+          <View style={styles.topRow}>
+            <Text style={styles.category}>
+              {item.dare.category.toUpperCase()}
+            </Text>
+
+            <Text
+              style={
+                item.state ===
+                'COMPLETED'
+                  ? styles.completedState
+                  : styles.state
+              }
+            >
+              {item.state}
+            </Text>
+          </View>
+
+          <Text style={styles.title}>
+            {item.dare.title}
           </Text>
 
-          <Text style={styles.state}>
-            {item.state}
-          </Text>
-        </View>
-
-        <Text style={styles.title}>
-          {item.dare.title}
-        </Text>
-
-        <Text style={styles.description}>
-          {item.dare.description}
-        </Text>
-
-        <View style={styles.metaRow}>
-          <Text style={styles.meta}>
-            +{item.dare.xp_value} XP
+          <Text style={styles.description}>
+            {item.dare.description}
           </Text>
 
-          <Text style={styles.dot}>
-            ·
-          </Text>
+          <View style={styles.metaRow}>
+            <Text style={styles.meta}>
+              +{item.dare.xp_value} XP
+            </Text>
 
-          <Text style={styles.meta}>
-            {item.dare.proof_type} proof
-          </Text>
+            <Text style={styles.dot}>
+              ·
+            </Text>
 
-          {item.dare.time_limit_minutes !==
-            null && (
-            <>
-              <Text style={styles.dot}>
-                ·
-              </Text>
+            <Text style={styles.meta}>
+              {proofType === 'photo'
+                ? 'Photo / Post proof'
+                : proofType === 'video'
+                  ? 'Video proof'
+                  : 'Text proof'}
+            </Text>
 
-              <Text style={styles.meta}>
-                {item.dare.time_limit_minutes} min
-              </Text>
-            </>
-          )}
-        </View>
+            {item.dare
+              .time_limit_minutes !==
+              null && (
+              <>
+                <Text
+                  style={styles.dot}
+                >
+                  ·
+                </Text>
+
+                <Text
+                  style={styles.meta}
+                >
+                  {
+                    item.dare
+                      .time_limit_minutes
+                  }{' '}
+                  min
+                </Text>
+              </>
+            )}
+          </View>
+        </Pressable>
 
         {canStart && (
           <Pressable
             onPress={() =>
-              handleStartDare(item.id)
+              handleStartDare(
+                item.id,
+              )
             }
             disabled={isStarting}
             style={({ pressed }) => [
@@ -747,29 +844,77 @@ export default function DaresScreen() {
             {isStarting ? (
               <ActivityIndicator
                 size="small"
-                color={colors.background}
+                color={
+                  colors.background
+                }
               />
             ) : (
-              <Text style={styles.buttonText}>
+              <Text
+                style={
+                  styles.buttonText
+                }
+              >
                 ⚡ START DARE
               </Text>
             )}
           </Pressable>
         )}
 
-        {canSubmit && (
-          <View style={styles.proofSection}>
-            <Text style={styles.proofLabel}>
-              Your proof
+        {item.state ===
+          'IN_PROGRESS' && (
+          <View
+            style={
+              isSelected
+                ? styles.selectedBox
+                : styles.selectBox
+            }
+          >
+            <Text
+              style={
+                isSelected
+                  ? styles.selectedText
+                  : styles.selectText
+              }
+            >
+              {isSelected
+                ? '✓ THIS DARE IS SELECTED'
+                : 'Tap this Dare to select it'}
+            </Text>
+          </View>
+        )}
+
+        {canSubmitText && (
+          <View
+            style={
+              styles.proofSection
+            }
+          >
+            <Text
+              style={
+                styles.proofLabel
+              }
+            >
+              Text proof
+            </Text>
+
+            <Text
+              style={
+                styles.proofHint
+              }
+            >
+              Describe what you did for this Dare.
             </Text>
 
             <TextInput
               value={currentProof}
               onChangeText={(value) =>
-                setProofText((current) => ({
-                  ...current,
-                  [item.id]: value,
-                }))
+                setProofText(
+                  (current) => ({
+                    ...current,
+                    [item.id]:
+                      value,
+                  }),
+                )
               }
               placeholder="Tell us what you did..."
               placeholderTextColor={
@@ -778,18 +923,28 @@ export default function DaresScreen() {
               multiline
               textAlignVertical="top"
               maxLength={1000}
-              style={styles.proofInput}
+              style={
+                styles.proofInput
+              }
             />
 
-            <Text style={styles.characterCount}>
+            <Text
+              style={
+                styles.characterCount
+              }
+            >
               {currentProof.length}/1000
             </Text>
 
             <Pressable
               onPress={() =>
-                handleSubmitProof(item.id)
+                handleSubmitProof(
+                  item.id,
+                )
               }
-              disabled={isSubmitting}
+              disabled={
+                isSubmitting
+              }
               style={({ pressed }) => [
                 styles.submitButton,
                 pressed &&
@@ -800,38 +955,161 @@ export default function DaresScreen() {
               ]}
             >
               {isSubmitting ? (
-                <View style={styles.loadingRow}>
+                <View
+                  style={
+                    styles.loadingRow
+                  }
+                >
                   <ActivityIndicator
                     size="small"
-                    color={colors.background}
+                    color={
+                      colors.background
+                    }
                   />
 
                   <Text
-                    style={styles.loadingText}
+                    style={
+                      styles.loadingText
+                    }
                   >
                     SUBMITTING...
                   </Text>
                 </View>
               ) : (
-                <Text style={styles.buttonText}>
-                  SUBMIT PROOF
+                <Text
+                  style={
+                    styles.buttonText
+                  }
+                >
+                  SUBMIT TEXT PROOF
                 </Text>
               )}
             </Pressable>
           </View>
         )}
 
-        {item.state === 'SUBMITTED' && (
-          <View style={styles.progressBox}>
-            <Text style={styles.progressText}>
+        {item.state ===
+          'IN_PROGRESS' &&
+          isSelected &&
+          isPhotoProof && (
+            <View
+              style={
+                styles.proofSection
+              }
+            >
+              <Text
+                style={
+                  styles.proofLabel
+                }
+              >
+                Photo / Post proof
+              </Text>
+
+              <Text
+                style={
+                  styles.proofHint
+                }
+              >
+                Create a DareMe Post showing your Dare completion.
+              </Text>
+
+              <Pressable
+                onPress={() =>
+                  handleCreateProof(
+                    item.id,
+                    'photo',
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.submitButton,
+                  pressed &&
+                    styles.buttonPressed,
+                ]}
+              >
+                <Text
+                  style={
+                    styles.buttonText
+                  }
+                >
+                  📸 CREATE PROOF POST
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+        {item.state ===
+          'IN_PROGRESS' &&
+          isSelected &&
+          isVideoProof && (
+            <View
+              style={
+                styles.proofSection
+              }
+            >
+              <Text
+                style={
+                  styles.proofLabel
+                }
+              >
+                Video proof
+              </Text>
+
+              <Text
+                style={
+                  styles.proofHint
+                }
+              >
+                Select a video showing your Dare completion.
+              </Text>
+
+              <Pressable
+                onPress={() =>
+                  handleCreateProof(
+                    item.id,
+                    'video',
+                  )
+                }
+                style={({ pressed }) => [
+                  styles.submitButton,
+                  pressed &&
+                    styles.buttonPressed,
+                ]}
+              >
+                <Text
+                  style={
+                    styles.buttonText
+                  }
+                >
+                  🎥 CREATE VIDEO PROOF
+                </Text>
+              </Pressable>
+            </View>
+          )}
+
+        {item.state ===
+          'SUBMITTED' && (
+          <View
+            style={
+              styles.progressBox
+            }
+          >
+            <Text
+              style={
+                styles.progressText
+              }
+            >
               ⏳ Proof submitted. Ready for verification.
             </Text>
 
             <Pressable
               onPress={() =>
-                handleVerifyDare(item.id)
+                handleVerifyDare(
+                  item.id,
+                )
               }
-              disabled={isVerifying}
+              disabled={
+                isVerifying
+              }
               style={({ pressed }) => [
                 styles.verifyButton,
                 pressed &&
@@ -844,10 +1122,16 @@ export default function DaresScreen() {
               {isVerifying ? (
                 <ActivityIndicator
                   size="small"
-                  color={colors.background}
+                  color={
+                    colors.background
+                  }
                 />
               ) : (
-                <Text style={styles.buttonText}>
+                <Text
+                  style={
+                    styles.buttonText
+                  }
+                >
                   ✓ VERIFY PROOF
                 </Text>
               )}
@@ -855,17 +1139,30 @@ export default function DaresScreen() {
           </View>
         )}
 
-        {item.state === 'VERIFIED' && (
-          <View style={styles.progressBox}>
-            <Text style={styles.progressText}>
+        {item.state ===
+          'VERIFIED' && (
+          <View
+            style={
+              styles.progressBox
+            }
+          >
+            <Text
+              style={
+                styles.progressText
+              }
+            >
               ✓ Proof verified.
             </Text>
 
             <Pressable
               onPress={() =>
-                handleCompleteDare(item.id)
+                handleCompleteDare(
+                  item.id,
+                )
               }
-              disabled={isCompleting}
+              disabled={
+                isCompleting
+              }
               style={({ pressed }) => [
                 styles.completeButton,
                 pressed &&
@@ -878,10 +1175,16 @@ export default function DaresScreen() {
               {isCompleting ? (
                 <ActivityIndicator
                   size="small"
-                  color={colors.background}
+                  color={
+                    colors.background
+                  }
                 />
               ) : (
-                <Text style={styles.buttonText}>
+                <Text
+                  style={
+                    styles.buttonText
+                  }
+                >
                   🎉 COMPLETE DARE
                 </Text>
               )}
@@ -915,7 +1218,11 @@ export default function DaresScreen() {
             {item.dare.category.toUpperCase()}
           </Text>
 
-          <Text style={styles.completedState}>
+          <Text
+            style={
+              styles.completedState
+            }
+          >
             ✓ COMPLETED
           </Text>
         </View>
@@ -924,7 +1231,11 @@ export default function DaresScreen() {
           {item.dare.title}
         </Text>
 
-        <Text style={styles.description}>
+        <Text
+          style={
+            styles.description
+          }
+        >
           {item.dare.description}
         </Text>
 
@@ -942,8 +1253,16 @@ export default function DaresScreen() {
           </Text>
         </View>
 
-        <View style={styles.completedBox}>
-          <Text style={styles.completedMessage}>
+        <View
+          style={
+            styles.completedBox
+          }
+        >
+          <Text
+            style={
+              styles.completedMessage
+            }
+          >
             🎉 Dare completed successfully
           </Text>
         </View>
@@ -951,9 +1270,6 @@ export default function DaresScreen() {
     );
   };
 
-  /*
-   * RENDER
-   */
   return (
     <View style={styles.screen}>
       <Text style={styles.header}>
@@ -995,26 +1311,47 @@ export default function DaresScreen() {
         contentContainerStyle={
           styles.content
         }
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator={
+          false
+        }
       >
         {/* ACTIVE */}
-        {activeTab === 'Active' &&
+        {activeTab ===
+          'Active' &&
           (loading ? (
-            <View style={styles.center}>
+            <View
+              style={
+                styles.center
+              }
+            >
               <ActivityIndicator
                 size="large"
-                color={colors.accent}
+                color={
+                  colors.accent
+                }
               />
             </View>
-          ) : activeDares.length === 0 ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>
+          ) : activeDares.length ===
+            0 ? (
+            <View
+              style={
+                styles.empty
+              }
+            >
+              <Text
+                style={
+                  styles.emptyTitle
+                }
+              >
                 No active dares
               </Text>
 
-              <Text style={styles.emptyText}>
-                Accept a dare from Discover to
-                see it here.
+              <Text
+                style={
+                  styles.emptyText
+                }
+              >
+                Accept a Dare from Home or Discover to see it here.
               </Text>
             </View>
           ) : (
@@ -1024,23 +1361,42 @@ export default function DaresScreen() {
           ))}
 
         {/* COMPLETED */}
-        {activeTab === 'Completed' &&
+        {activeTab ===
+          'Completed' &&
           (completedLoading ? (
-            <View style={styles.center}>
+            <View
+              style={
+                styles.center
+              }
+            >
               <ActivityIndicator
                 size="large"
-                color={colors.accent}
+                color={
+                  colors.accent
+                }
               />
             </View>
-          ) : completedDares.length === 0 ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>
+          ) : completedDares.length ===
+            0 ? (
+            <View
+              style={
+                styles.empty
+              }
+            >
+              <Text
+                style={
+                  styles.emptyTitle
+                }
+              >
                 No completed dares
               </Text>
 
-              <Text style={styles.emptyText}>
-                Complete your first dare and
-                it will appear here.
+              <Text
+                style={
+                  styles.emptyText
+                }
+              >
+                Complete your first Dare and it will appear here.
               </Text>
             </View>
           ) : (
@@ -1049,17 +1405,29 @@ export default function DaresScreen() {
             )
           ))}
 
-        {/* RECEIVED / SENT — NEXT PHASE */}
-        {(activeTab === 'Received' ||
+        {/* RECEIVED / SENT */}
+        {(activeTab ===
+          'Received' ||
           activeTab === 'Sent') && (
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>
+          <View
+            style={
+              styles.empty
+            }
+          >
+            <Text
+              style={
+                styles.emptyTitle
+              }
+            >
               {activeTab} Dares
             </Text>
 
-            <Text style={styles.emptyText}>
-              This section will be connected
-              next.
+            <Text
+              style={
+                styles.emptyText
+              }
+            >
+              This section will be connected next.
             </Text>
           </View>
         )}
@@ -1071,163 +1439,245 @@ export default function DaresScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor:
+      colors.background,
   },
 
   header: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    paddingBottom: spacing.md,
-    color: colors.primaryText,
-    fontFamily: fontFamily.headingBold,
-    fontSize: fontSize.xl,
+    paddingHorizontal:
+      spacing.lg,
+    paddingTop:
+      spacing.lg,
+    paddingBottom:
+      spacing.md,
+    color:
+      colors.primaryText,
+    fontFamily:
+      fontFamily.headingBold,
+    fontSize:
+      fontSize.xl,
   },
 
   tabs: {
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingHorizontal: spacing.md,
+    borderBottomColor:
+      colors.border,
+    paddingHorizontal:
+      spacing.md,
   },
 
   tab: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
+    justifyContent:
+      'center',
+    paddingVertical:
+      spacing.md,
     borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
+    borderBottomColor:
+      'transparent',
   },
 
   tabSelected: {
-    borderBottomColor: colors.accent,
+    borderBottomColor:
+      colors.accent,
   },
 
   tabText: {
-    color: colors.secondaryText,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.sm,
+    color:
+      colors.secondaryText,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.sm,
   },
 
   tabTextSelected: {
-    color: colors.accent,
+    color:
+      colors.accent,
   },
 
   content: {
-    padding: spacing.md,
-    paddingBottom: spacing.xl,
+    padding:
+      spacing.md,
+    paddingBottom:
+      spacing.xl,
   },
 
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor:
+      colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    borderColor:
+      colors.border,
+    borderRadius:
+      radius.lg,
+    padding:
+      spacing.md,
+    marginBottom:
+      spacing.md,
+  },
+
+  cardSelected: {
+    borderColor:
+      colors.accent,
+    borderWidth: 2,
   },
 
   topRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
+    justifyContent:
+      'space-between',
+    alignItems:
+      'center',
+    marginBottom:
+      spacing.sm,
   },
 
   category: {
-    color: colors.accent,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.xs,
+    color:
+      colors.accent,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.xs,
   },
 
   state: {
-    color: colors.secondaryText,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.xs,
+    color:
+      colors.secondaryText,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.xs,
   },
 
   completedState: {
-    color: colors.success,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.xs,
+    color:
+      colors.success,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.xs,
   },
 
   title: {
-    color: colors.primaryText,
-    fontFamily: fontFamily.headingBold,
-    fontSize: fontSize.lg,
-    marginBottom: spacing.sm,
+    color:
+      colors.primaryText,
+    fontFamily:
+      fontFamily.headingBold,
+    fontSize:
+      fontSize.lg,
+    marginBottom:
+      spacing.sm,
   },
 
   description: {
-    color: colors.secondaryText,
-    fontFamily: fontFamily.body,
-    fontSize: fontSize.sm,
+    color:
+      colors.secondaryText,
+    fontFamily:
+      fontFamily.body,
+    fontSize:
+      fontSize.sm,
     lineHeight: 21,
-    marginBottom: spacing.md,
+    marginBottom:
+      spacing.md,
   },
 
   metaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems:
+      'center',
     flexWrap: 'wrap',
-    marginBottom: spacing.md,
+    marginBottom:
+      spacing.md,
   },
 
   meta: {
-    color: colors.primaryText,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.sm,
+    color:
+      colors.primaryText,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.sm,
   },
 
   xpText: {
-    color: colors.accent,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.sm,
+    color:
+      colors.accent,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.sm,
   },
 
   dot: {
-    color: colors.secondaryText,
+    color:
+      colors.secondaryText,
     marginHorizontal: 6,
   },
 
   startButton: {
     minHeight: 48,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
+    borderRadius:
+      radius.md,
+    backgroundColor:
+      colors.accent,
+    alignItems:
+      'center',
+    justifyContent:
+      'center',
+    paddingHorizontal:
+      spacing.md,
   },
 
   submitButton: {
     minHeight: 48,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
+    borderRadius:
+      radius.md,
+    backgroundColor:
+      colors.accent,
+    alignItems:
+      'center',
+    justifyContent:
+      'center',
+    paddingHorizontal:
+      spacing.md,
+    marginTop:
+      spacing.sm,
   },
 
   verifyButton: {
     minHeight: 48,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.md,
+    borderRadius:
+      radius.md,
+    backgroundColor:
+      colors.accent,
+    alignItems:
+      'center',
+    justifyContent:
+      'center',
+    paddingHorizontal:
+      spacing.md,
+    marginTop:
+      spacing.md,
   },
 
   completeButton: {
     minHeight: 48,
-    borderRadius: radius.md,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-    marginTop: spacing.md,
+    borderRadius:
+      radius.md,
+    backgroundColor:
+      colors.accent,
+    alignItems:
+      'center',
+    justifyContent:
+      'center',
+    paddingHorizontal:
+      spacing.md,
+    marginTop:
+      spacing.md,
   },
 
   buttonPressed: {
@@ -1239,103 +1689,216 @@ const styles = StyleSheet.create({
   },
 
   buttonText: {
-    color: colors.background,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.sm,
+    color:
+      colors.background,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.sm,
   },
 
   proofSection: {
-    marginTop: spacing.sm,
+    marginTop:
+      spacing.sm,
   },
 
   proofLabel: {
-    color: colors.primaryText,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.sm,
-    marginBottom: spacing.sm,
+    color:
+      colors.primaryText,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.sm,
+    marginBottom:
+      spacing.sm,
+  },
+
+  proofHint: {
+    color:
+      colors.secondaryText,
+    fontFamily:
+      fontFamily.body,
+    fontSize:
+      fontSize.xs,
+    lineHeight: 18,
+    marginBottom:
+      spacing.sm,
   },
 
   proofInput: {
     minHeight: 130,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceElevated,
-    color: colors.primaryText,
-    fontFamily: fontFamily.body,
-    fontSize: fontSize.sm,
-    padding: spacing.md,
+    borderColor:
+      colors.border,
+    borderRadius:
+      radius.md,
+    backgroundColor:
+      colors.surfaceElevated,
+    color:
+      colors.primaryText,
+    fontFamily:
+      fontFamily.body,
+    fontSize:
+      fontSize.sm,
+    padding:
+      spacing.md,
   },
 
   characterCount: {
-    color: colors.secondaryText,
-    fontFamily: fontFamily.body,
-    fontSize: fontSize.xs,
-    textAlign: 'right',
+    color:
+      colors.secondaryText,
+    fontFamily:
+      fontFamily.body,
+    fontSize:
+      fontSize.xs,
+    textAlign:
+      'right',
     marginTop: 4,
   },
 
+  selectedBox: {
+    borderWidth: 1,
+    borderColor:
+      colors.accent,
+    backgroundColor:
+      colors.surfaceElevated,
+    borderRadius:
+      radius.md,
+    padding:
+      spacing.sm,
+    marginTop:
+      spacing.sm,
+  },
+
+  selectBox: {
+    borderWidth: 1,
+    borderColor:
+      colors.border,
+    backgroundColor:
+      colors.surfaceElevated,
+    borderRadius:
+      radius.md,
+    padding:
+      spacing.sm,
+    marginTop:
+      spacing.sm,
+  },
+
+  selectedText: {
+    color:
+      colors.accent,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.xs,
+    textAlign:
+      'center',
+  },
+
+  selectText: {
+    color:
+      colors.secondaryText,
+    fontFamily:
+      fontFamily.body,
+    fontSize:
+      fontSize.xs,
+    textAlign:
+      'center',
+  },
+
   loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+    flexDirection:
+      'row',
+    alignItems:
+      'center',
+    gap:
+      spacing.sm,
   },
 
   loadingText: {
-    color: colors.background,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.sm,
+    color:
+      colors.background,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.sm,
   },
 
   progressBox: {
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    borderColor:
+      colors.border,
+    borderRadius:
+      radius.md,
+    padding:
+      spacing.md,
+    marginTop:
+      spacing.sm,
   },
 
   progressText: {
-    color: colors.accent,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.sm,
+    color:
+      colors.accent,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.sm,
   },
 
   completedBox: {
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    padding: spacing.md,
+    borderColor:
+      colors.border,
+    borderRadius:
+      radius.md,
+    padding:
+      spacing.md,
   },
 
   completedMessage: {
-    color: colors.success,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.sm,
+    color:
+      colors.success,
+    fontFamily:
+      fontFamily.bodyMedium,
+    fontSize:
+      fontSize.sm,
   },
 
   empty: {
     paddingVertical: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems:
+      'center',
+    justifyContent:
+      'center',
   },
 
   emptyTitle: {
-    color: colors.primaryText,
-    fontFamily: fontFamily.headingBold,
-    fontSize: fontSize.lg,
-    marginBottom: spacing.sm,
+    color:
+      colors.primaryText,
+    fontFamily:
+      fontFamily.headingBold,
+    fontSize:
+      fontSize.lg,
+    marginBottom:
+      spacing.sm,
   },
 
   emptyText: {
-    color: colors.secondaryText,
-    fontFamily: fontFamily.body,
-    fontSize: fontSize.sm,
-    textAlign: 'center',
+    color:
+      colors.secondaryText,
+    fontFamily:
+      fontFamily.body,
+    fontSize:
+      fontSize.sm,
+    textAlign:
+      'center',
   },
 
   center: {
     paddingVertical: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems:
+      'center',
+    justifyContent:
+      'center',
   },
 });

@@ -1,4 +1,5 @@
 import { useRouter } from 'expo-router';
+import { VideoView, useVideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
@@ -255,9 +256,10 @@ export default function DiscoverScreen() {
         let signedMediaUrl: string | null = null;
 
         if (
-          post.media_url &&
-          post.media_type === 'image'
-        ) {
+  post.media_url &&
+  (post.media_type === 'image' ||
+    post.media_type === 'video')
+) {
           const { data: signedData } =
             await supabase.storage
               .from('post-media')
@@ -954,9 +956,15 @@ function PostCard({
     post.media_type === 'image' &&
     !!post.signedMediaUrl;
 
+    const isVideo =
+  post.media_type === 'video' &&
+  !!post.signedMediaUrl;
+
   const isText =
     post.post_type === 'text' ||
     !post.media_type;
+
+  
 
   return (
     <View style={styles.postCard}>
@@ -1037,6 +1045,11 @@ function PostCard({
           resizeMode="contain"
         />
       ) : null}
+      {isVideo ? (
+  <PostVideo
+    uri={post.signedMediaUrl!}
+  />
+) : null}
 
       {/* Text-only indicator */}
       {isText && !post.content ? (
@@ -1145,7 +1158,23 @@ function PostCard({
 /* ======================================================= */
 /* COMMENT MODAL                                           */
 /* ======================================================= */
+function PostVideo({ uri }: { uri: string }) {
+  const player = useVideoPlayer(uri, (videoPlayer) => {
+    videoPlayer.loop = true;
+    videoPlayer.muted = true;
+    videoPlayer.play();
+  });
 
+  return (
+    <VideoView
+      player={player}
+      style={styles.postVideo}
+      contentFit="contain"
+      nativeControls
+      playsInline
+    />
+  );
+}
 function CommentModal({
   visible,
   post,
@@ -1621,6 +1650,11 @@ const styles = StyleSheet.create({
     aspectRatio: 4 / 5,
     backgroundColor: colors.background,
   },
+  postVideo: {
+  width: '100%',
+  aspectRatio: 4 / 5,
+  backgroundColor: colors.background,
+},
 
   emptyPostText: {
     color: colors.secondaryText,

@@ -337,13 +337,16 @@ useEffect(() => {
               loading={takingDare === dare.id}
               inProgress={inProgressDares.has(dare.id)}
               onPress={() => {
-                router.push({
-                  pathname: '/dare-detail',
-                  params: {
-                    id: dare.id,
-                  },
-                });
-              }}
+  if (inProgressDares.has(dare.id)) {
+    router.replace('/(tabs)/dares');
+    return;
+  }
+
+  router.push({
+    pathname: '/dare-detail',
+    params: { id: dare.id },
+  });
+}}
               onPrimaryAction={() => {
   handleTakeDare(dare.id);
 }}
