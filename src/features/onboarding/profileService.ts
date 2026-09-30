@@ -1,3 +1,4 @@
+import { File } from 'expo-file-system';
 import { supabase } from '../../lib/supabase';
 
 export type ProfileData = {
@@ -70,44 +71,72 @@ export async function uploadAvatar(
     throw new Error('Profile image is required.');
   }
 
-  const response = await fetch(localUri);
+  try {
+    console.log('[DareMe Avatar] Reading local file:', localUri);
 
-  if (!response.ok) {
-    throw new Error(
-      'Could not read the selected profile photo.',
+    const file = new File(localUri);
+    const arrayBuffer = await file.arrayBuffer();
+
+    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+      throw new Error(
+        'The selected profile photo is empty or could not be read.',
+      );
+    }
+
+    const filePath = `${userId}/${Date.now()}.jpg`;
+
+    console.log(
+      '[DareMe Avatar] Uploading:',
+      filePath,
     );
-  }
 
-  const arrayBuffer = await response.arrayBuffer();
+    const { error: uploadError } =
+      await supabase.storage
+        .from('avatars')
+        .upload(filePath, arrayBuffer, {
+          contentType: 'image/jpeg',
+          cacheControl: '3600',
+          upsert: false,
+        });
 
-  const filePath = `${userId}/${Date.now()}.jpg`;
+    if (uploadError) {
+      console.error(
+        '[DareMe Avatar] Storage upload failed:',
+        uploadError,
+      );
 
-  const { error: uploadError } = await supabase.storage
-    .from('avatars')
-    .upload(filePath, arrayBuffer, {
-      contentType: 'image/jpeg',
-      cacheControl: '3600',
-      upsert: false,
-    });
+      throw uploadError;
+    }
 
-  if (uploadError) {
-    console.error('Avatar upload failed:', uploadError);
-    throw uploadError;
-  }
+    const {
+      data: publicUrlData,
+    } = supabase.storage
+      .from('avatars')
+      .getPublicUrl(filePath);
 
-  const {
-    data: publicUrlData,
-  } = supabase.storage
-    .from('avatars')
-    .getPublicUrl(filePath);
+    if (!publicUrlData?.publicUrl) {
+      throw new Error(
+        'Avatar uploaded, but its public URL could not be created.',
+      );
+    }
 
-  if (!publicUrlData?.publicUrl) {
-    throw new Error(
-      'Avatar uploaded, but its public URL could not be created.',
+    console.log(
+      '[DareMe Avatar] Upload successful.',
     );
-  }
 
-  return publicUrlData.publicUrl;
+    return publicUrlData.publicUrl;
+  } catch (error) {
+    console.error(
+      '[DareMe Avatar] File read/upload failed:',
+      error,
+    );
+
+    throw error instanceof Error
+      ? error
+      : new Error(
+          'Could not read the selected profile photo.',
+        );
+  }
 }
 
 /**

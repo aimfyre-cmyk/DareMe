@@ -1,8 +1,10 @@
+import { useEvent } from 'expo';
 import { useRouter } from 'expo-router';
 import { VideoView, useVideoPlayer } from 'expo-video';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Dimensions,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -133,6 +135,7 @@ export default function DiscoverScreen() {
 
   const [takingDare, setTakingDare] =
     useState<string | null>(null);
+  const [scrollY, setScrollY] = useState(0);
 
   const [commentPost, setCommentPost] =
     useState<FeedPost | null>(null);
@@ -797,7 +800,11 @@ export default function DiscoverScreen() {
   };
 
   return (
-    <Screen>
+    <Screen
+      onScroll={(event) => {
+        setScrollY(event.nativeEvent.contentOffset.y);
+      }}
+    >
       <AppHeader title="Discover" />
 
       {/* ================================================= */}
@@ -822,6 +829,7 @@ export default function DiscoverScreen() {
               onComment={() =>
                 loadComments(post)
               }
+              scrollY={scrollY}
             />
           ))}
         </View>
@@ -935,10 +943,12 @@ function PostCard({
   post,
   onLike,
   onComment,
+  scrollY,
 }: {
   post: FeedPost;
   onLike: () => void;
   onComment: () => void;
+  scrollY: number;
 }) {
   const router = useRouter();
 
@@ -1048,6 +1058,7 @@ function PostCard({
       {isVideo ? (
   <PostVideo
     uri={post.signedMediaUrl!}
+    scrollY={scrollY}
   />
 ) : null}
 
@@ -1158,23 +1169,101 @@ function PostCard({
 /* ======================================================= */
 /* COMMENT MODAL                                           */
 /* ======================================================= */
-function PostVideo({ uri }: { uri: string }) {
+function PostVideo({
+  uri,
+  scrollY,
+}: {
+  uri: string;
+  scrollY: number;
+}) {
+  const [muted, setMuted] = useState(true);
+  const videoRef = useRef<View>(null);
+  const isVisibleRef = useRef(false);
+
   const player = useVideoPlayer(uri, (videoPlayer) => {
     videoPlayer.loop = true;
     videoPlayer.muted = true;
-    videoPlayer.play();
   });
 
+  const { status } = useEvent(player, 'statusChange', {
+    status: player.status,
+  });
+
+  const updatePlayback = useCallback(() => {
+    videoRef.current?.measureInWindow((x, y, width, height) => {
+      const viewportHeight = Dimensions.get('window').height;
+      const visibleTop = Math.max(y, 0);
+      const visibleBottom = Math.min(y + height, viewportHeight);
+      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+      const visibleRatio = height > 0 ? visibleHeight / height : 0;
+      const shouldPlay = visibleRatio >= 0.5;
+
+      if (shouldPlay === isVisibleRef.current) {
+        return;
+      }
+
+      isVisibleRef.current = shouldPlay;
+
+      if (shouldPlay) {
+        player.muted = muted;
+        if (status === 'readyToPlay') {
+          player.play();
+        }
+      } else {
+        player.pause();
+      }
+    });
+  }, [muted, player, status, scrollY]);
+
+  useEffect(() => {
+    const timer = setTimeout(updatePlayback, 50);
+    return () => clearTimeout(timer);
+  }, [updatePlayback]);
+
+  useEffect(() => {
+    if (status === 'readyToPlay') {
+      updatePlayback();
+    }
+  }, [status, updatePlayback]);
+
+  useEffect(() => {
+    return () => {
+      player.pause();
+    };
+  }, [player]);
+
+  const toggleMute = () => {
+    const nextMuted = !muted;
+    player.muted = nextMuted;
+    setMuted(nextMuted);
+  };
+
   return (
-    <VideoView
-      player={player}
-      style={styles.postVideo}
-      contentFit="contain"
-      nativeControls
-      playsInline
-    />
+    <View ref={videoRef} style={styles.videoContainer}>
+      <VideoView
+        player={player}
+        style={styles.postVideo}
+        contentFit="contain"
+        nativeControls={false}
+        playsInline
+      />
+
+      <Pressable
+        onPress={toggleMute}
+        style={styles.videoMuteButton}
+        accessibilityRole="button"
+        accessibilityLabel={
+          muted ? 'Unmute video' : 'Mute video'
+        }
+      >
+        <Text style={styles.videoMuteText}>
+          {muted ? '🔇' : '🔊'}
+        </Text>
+      </Pressable>
+    </View>
   );
 }
+
 function CommentModal({
   visible,
   post,
@@ -1655,6 +1744,26 @@ const styles = StyleSheet.create({
   aspectRatio: 4 / 5,
   backgroundColor: colors.background,
 },
+videoContainer: {
+  position: 'relative',
+},
+
+videoMuteButton: {
+  position: 'absolute',
+  right: 10,
+  bottom: 10,
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  alignItems: 'center',
+  justifyContent: 'center',
+  backgroundColor: 'rgba(0,0,0,0.55)',
+},
+
+videoMuteText: {
+  fontSize: 16,
+},
+
 
   emptyPostText: {
     color: colors.secondaryText,
