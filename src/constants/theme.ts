@@ -10,7 +10,7 @@ export const colors = {
   surfaceElevated: '#1B1B1F',
   primaryText: '#FFFFFF',
   secondaryText: '#A7A7AD',
-  accent: '#B7FF3C',
+  accent: 'hsl(0, 23%, 98%)',
   danger: '#FF4D5A',
   success: '#35D07F',
   border: '#29292E',

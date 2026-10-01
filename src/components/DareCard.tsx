@@ -1,4 +1,13 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ImageBackground,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+
+import Ionicons from '@expo/vector-icons/Ionicons';
+
 import {
   colors,
   fontFamily,
@@ -23,6 +32,18 @@ type DareCardProps = {
   onPrimaryAction?: () => void;
   loading?: boolean;
   inProgress?: boolean;
+
+  /* Social actions */
+  likeCount?: number;
+  commentCount?: number;
+  likedByMe?: boolean;
+  onLike?: () => void;
+  onComment?: () => void;
+  onShare?: () => void;
+
+  /* Owner-only menu */
+  isOwner?: boolean;
+  onDelete?: () => void;
 };
 
 const difficultyVariant: Record<
@@ -40,30 +61,94 @@ export function DareCard({
   onPrimaryAction,
   loading = false,
   inProgress = false,
+
+  likeCount = 0,
+  commentCount = 0,
+  likedByMe = false,
+  onLike,
+  onComment,
+  onShare,
+
+  isOwner = false,
+  onDelete,
 }: DareCardProps) {
   const handlePrimaryPress = () => {
-  if (loading) {
-    return;
-  }
+    if (loading) {
+      return;
+    }
 
-  if (inProgress) {
+    if (inProgress) {
+      onPress?.();
+      return;
+    }
+
+    console.log('[DareCard] TAKE THE DARE:', dare.id);
+
+    if (onPrimaryAction) {
+      onPrimaryAction();
+      return;
+    }
+
     onPress?.();
-    return;
-  }
+  };
 
-  console.log('[DareCard] TAKE THE DARE:', dare.id);
-
-  if (onPrimaryAction) {
-    onPrimaryAction();
-    return;
-  }
-
-  onPress?.();
-};
+  const coverSource =
+    dare.difficulty === 'Easy'
+      ? require('../../assets/dare-covers/easy-cover.jpg')
+      : dare.difficulty === 'Medium'
+        ? require('../../assets/dare-covers/medium-cover.jpg')
+        : require('../../assets/dare-covers/hard-cover.jpg');
 
   return (
     <View style={styles.card}>
-      {/* Tags */}
+      {/* ================================================= */}
+      {/* CINEMATIC DARE COVER                              */}
+      {/* ================================================= */}
+
+      <ImageBackground
+        source={coverSource}
+        style={styles.cover}
+        imageStyle={styles.coverImage}
+      >
+        <View style={styles.coverOverlay} />
+
+        {/* OWNER MENU */}
+        {isOwner && onDelete ? (
+          <View style={styles.menuWrapper}>
+            <Pressable
+              style={styles.menuButton}
+              onPress={onDelete}
+              accessibilityRole="button"
+              accessibilityLabel="Delete post"
+              hitSlop={10}
+            >
+              <Ionicons
+                name="ellipsis-horizontal"
+                size={24}
+                color="#FFFFFF"
+              />
+            </Pressable>
+          </View>
+        ) : null}
+
+        <View style={styles.coverContent}>
+          <Text style={styles.coverDifficulty}>
+            {dare.difficulty.toUpperCase()}
+          </Text>
+
+          <Text
+            style={styles.coverTitle}
+            numberOfLines={3}
+          >
+            {dare.title}
+          </Text>
+        </View>
+      </ImageBackground>
+
+      {/* ================================================= */}
+      {/* TAGS                                             */}
+      {/* ================================================= */}
+
       <View style={styles.tagRow}>
         <Chip
           label={dare.category}
@@ -76,12 +161,10 @@ export function DareCard({
         />
       </View>
 
-      {/* Title */}
-      <Text style={styles.title}>
-        {dare.title}
-      </Text>
+      {/* ================================================= */}
+      {/* META                                             */}
+      {/* ================================================= */}
 
-      {/* Meta */}
       <View style={styles.metaRow}>
         <Text style={styles.meta}>
           +{dare.xpValue} XP
@@ -96,7 +179,94 @@ export function DareCard({
         </Text>
       </View>
 
-      {/* CTA */}
+      {/* ================================================= */}
+      {/* SOCIAL ACTIONS                                   */}
+      {/* ================================================= */}
+
+      <View style={styles.actions}>
+        {/* LIKE */}
+        <Pressable
+          style={styles.actionButton}
+          onPress={onLike}
+          disabled={!onLike}
+          accessibilityRole="button"
+          accessibilityLabel={
+            likedByMe
+              ? 'Unlike dare'
+              : 'Like dare'
+          }
+        >
+          <Ionicons
+            name={
+              likedByMe
+                ? 'heart'
+                : 'heart-outline'
+            }
+            size={22}
+            color={
+              likedByMe
+                ? '#FF4D67'
+                : colors.primaryText
+            }
+          />
+
+          <Text
+            style={[
+              styles.actionText,
+              likedByMe && styles.likedText,
+            ]}
+          >
+            {likeCount > 0
+              ? likeCount
+              : 'Like'}
+          </Text>
+        </Pressable>
+
+        {/* COMMENT */}
+        <Pressable
+          style={styles.actionButton}
+          onPress={onComment}
+          disabled={!onComment}
+          accessibilityRole="button"
+          accessibilityLabel="Open comments"
+        >
+          <Ionicons
+            name="chatbubble-outline"
+            size={21}
+            color={colors.primaryText}
+          />
+
+          <Text style={styles.actionText}>
+            {commentCount > 0
+              ? commentCount
+              : 'Comment'}
+          </Text>
+        </Pressable>
+
+        {/* SHARE */}
+        <Pressable
+          style={styles.actionButton}
+          onPress={onShare}
+          disabled={!onShare}
+          accessibilityRole="button"
+          accessibilityLabel="Share dare"
+        >
+          <Ionicons
+            name="paper-plane-outline"
+            size={21}
+            color={colors.primaryText}
+          />
+
+          <Text style={styles.actionText}>
+            Share
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* ================================================= */}
+      {/* CTA                                              */}
+      {/* ================================================= */}
+
       <Pressable
         onPress={handlePrimaryPress}
         disabled={loading}
@@ -109,11 +279,12 @@ export function DareCard({
         ]}
       >
         <Text style={styles.ctaLabel}>
-{loading
-  ? 'Starting Dare...'
-  : inProgress
-    ? '🔥 IN PROGRESS'
-    : '⚡ TAKE THE DARE'}</Text>
+          {loading
+            ? 'Starting Dare...'
+            : inProgress
+              ? 'IN PROGRESS'
+              : 'TAKE THE DARE'}
+        </Text>
       </Pressable>
     </View>
   );
@@ -122,26 +293,78 @@ export function DareCard({
 const styles = StyleSheet.create({
   card: {
     backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+
+  cover: {
+    width: '100%',
+    height: 330,
+    borderRadius: radius.lg,
+    marginBottom: spacing.lg,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    alignSelf: 'stretch',
+  },
+
+  coverImage: {
+    borderRadius: radius.lg,
+    resizeMode: 'cover',
+  },
+
+  coverOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.22)',
+  },
+
+  menuWrapper: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.md,
+    zIndex: 10,
+  },
+
+  menuButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  coverContent: {
+    padding: spacing.lg,
+  },
+
+  coverDifficulty: {
+    color: '#FFFFFF',
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    marginBottom: spacing.sm,
+  },
+
+  coverTitle: {
+    color: '#FFFFFF',
+    fontFamily: fontFamily.headingBold,
+    fontSize: fontSize.xxl,
+    lineHeight: 38,
   },
 
   tagRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-
-  title: {
-    color: colors.primaryText,
-    fontFamily: fontFamily.headingBold,
-    fontSize: fontSize.lg,
-    lineHeight: 24,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.lg,
   },
 
   metaRow: {
@@ -163,13 +386,49 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.xs,
   },
 
+  /* ===================================================== */
+  /* SOCIAL ACTION STYLES                                 */
+  /* ===================================================== */
+
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    paddingTop: spacing.sm,
+    marginBottom: spacing.md,
+    gap: spacing.lg,
+  },
+
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: 38,
+  },
+
+  actionText: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.sm,
+  },
+
+  likedText: {
+    color: '#FF4D67',
+  },
+
+  /* ===================================================== */
+  /* CTA                                                  */
+  /* ===================================================== */
+
   cta: {
-    minHeight: 44,
+    minHeight: 50,
     borderRadius: radius.md,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.lg,
+    marginTop: spacing.xs,
   },
 
   ctaPressed: {
@@ -179,6 +438,8 @@ const styles = StyleSheet.create({
   ctaLabel: {
     color: '#000000',
     fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.sm,
+    fontSize: fontSize.md,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
 });

@@ -2,9 +2,15 @@ import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
@@ -21,6 +27,7 @@ import { supabase } from '../../lib/supabase';
 
 type DareRow = {
   id: string;
+  creator_id: string;
   title: string;
   category: string;
   difficulty: string;
@@ -45,6 +52,10 @@ function formatDifficulty(value: string): MockDare['difficulty'] {
   return 'Easy';
 }
 
+type HomeDare = MockDare & {
+  creatorId: string;
+};
+
 function formatProofType(value: string): MockDare['proofType'] {
   const normalized = value.toLowerCase();
 
@@ -60,13 +71,20 @@ function formatProofType(value: string): MockDare['proofType'] {
 }
 
 export default function HomeScreen() {
-  const [dares, setDares] = useState<MockDare[]>([]);
+  const [dares, setDares] = useState<HomeDare[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [takingDare, setTakingDare] = useState<string | null>(null);
-  const [inProgressDares, setInProgressDares] = useState<
-  Set<string>
->(new Set());
+  const [inProgressDares, setInProgressDares] = useState<Set<string>>(
+    new Set(),
+  );
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
+  const [likedDares, setLikedDares] = useState<Set<string>>(new Set());
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
+  const [commentDareId, setCommentDareId] = useState<string | null>(null);
+  const [commentText, setCommentText] = useState('');
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
 
   const loadDares = useCallback(async () => {
     try {
@@ -76,7 +94,7 @@ export default function HomeScreen() {
       const { data, error: fetchError } = await supabase
         .from('dares')
         .select(
-          'id, title, category, difficulty, xp_value, proof_type, status, visibility, created_at',
+          'id, creator_id, title, category, difficulty, xp_value, proof_type, status, visibility, created_at',
         )
         .eq('status', 'active')
         .eq('visibility', 'anyone')
@@ -86,16 +104,71 @@ export default function HomeScreen() {
         throw fetchError;
       }
 
-      const mappedDares: MockDare[] = ((data ?? []) as DareRow[]).map(
-        (dare) => ({
-          id: dare.id,
-          title: dare.title,
-          category: dare.category,
-          difficulty: formatDifficulty(dare.difficulty),
-          xpValue: dare.xp_value,
-          proofType: formatProofType(dare.proof_type),
-        }),
-      );
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      setCurrentUserId(user?.id ?? null);
+
+      const mappedDares = ((data ?? []) as DareRow[]).map((dare) => ({
+        id: dare.id,
+        creatorId: dare.creator_id,
+        title: dare.title,
+        category: dare.category,
+        difficulty: formatDifficulty(dare.difficulty),
+        xpValue: dare.xp_value,
+        proofType: formatProofType(dare.proof_type),
+      }));
+
+      const dareIds = mappedDares.map((dare) => dare.id);
+
+      if (dareIds.length > 0) {
+        const [likesResult, commentsResult] = await Promise.all([
+          supabase
+            .from('dare_likes')
+            .select('dare_id, user_id')
+            .in('dare_id', dareIds),
+          supabase
+            .from('dare_comments')
+            .select('dare_id')
+            .in('dare_id', dareIds),
+        ]);
+
+        if (likesResult.error) {
+          throw likesResult.error;
+        }
+
+        if (commentsResult.error) {
+          throw commentsResult.error;
+        }
+
+        const nextLikeCounts: Record<string, number> = {};
+        const nextLikedDares = new Set<string>();
+
+        for (const like of likesResult.data ?? []) {
+          nextLikeCounts[like.dare_id] =
+            (nextLikeCounts[like.dare_id] ?? 0) + 1;
+
+          if (user && like.user_id === user.id) {
+            nextLikedDares.add(like.dare_id);
+          }
+        }
+
+        const nextCommentCounts: Record<string, number> = {};
+
+        for (const comment of commentsResult.data ?? []) {
+          nextCommentCounts[comment.dare_id] =
+            (nextCommentCounts[comment.dare_id] ?? 0) + 1;
+        }
+
+        setLikeCounts(nextLikeCounts);
+        setLikedDares(nextLikedDares);
+        setCommentCounts(nextCommentCounts);
+      } else {
+        setLikeCounts({});
+        setLikedDares(new Set());
+        setCommentCounts({});
+      }
 
       setDares(mappedDares);
     } catch (err) {
@@ -108,11 +181,8 @@ export default function HomeScreen() {
   }, []);
 
   useEffect(() => {
-  loadDares();
-}, [loadDares]);
-useEffect(() => {
-  loadDares();
-}, [loadDares]);
+    loadDares();
+  }, [loadDares]);
 
 useEffect(() => {
   const loadInProgressDares = async () => {
@@ -265,7 +335,160 @@ useEffect(() => {
 }
 };
 
+  const handleLike = async (dareId: string) => {
+    if (!currentUserId) {
+      Alert.alert('Login required', 'Please log in to like a dare.');
+      return;
+    }
+
+    const alreadyLiked = likedDares.has(dareId);
+
+    setLikedDares((current) => {
+      const next = new Set(current);
+      if (alreadyLiked) {
+        next.delete(dareId);
+      } else {
+        next.add(dareId);
+      }
+      return next;
+    });
+
+    setLikeCounts((current) => ({
+      ...current,
+      [dareId]: Math.max(0, (current[dareId] ?? 0) + (alreadyLiked ? -1 : 1)),
+    }));
+
+    const query = supabase
+      .from('dare_likes')
+      .delete()
+      .eq('dare_id', dareId)
+      .eq('user_id', currentUserId);
+
+    const result = alreadyLiked
+      ? await query
+      : await supabase.from('dare_likes').insert({
+          dare_id: dareId,
+          user_id: currentUserId,
+        });
+
+    if (result.error) {
+      setLikedDares((current) => {
+        const next = new Set(current);
+        if (alreadyLiked) {
+          next.add(dareId);
+        } else {
+          next.delete(dareId);
+        }
+        return next;
+      });
+      setLikeCounts((current) => ({
+        ...current,
+        [dareId]: Math.max(0, (current[dareId] ?? 0) + (alreadyLiked ? 1 : -1)),
+      }));
+      console.error('[Home] Dare like error:', result.error);
+    }
+  };
+
+  const handleComment = (dareId: string) => {
+    setCommentDareId(dareId);
+    setCommentText('');
+  };
+
+  const handleSubmitComment = async () => {
+    if (!commentDareId || !currentUserId) {
+      return;
+    }
+
+    const content = commentText.trim();
+    if (!content) {
+      return;
+    }
+
+    try {
+      setCommentSubmitting(true);
+
+      const { error: insertError } = await supabase
+        .from('dare_comments')
+        .insert({
+          dare_id: commentDareId,
+          user_id: currentUserId,
+          content,
+        });
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      setCommentCounts((current) => ({
+        ...current,
+        [commentDareId]: (current[commentDareId] ?? 0) + 1,
+      }));
+      setCommentText('');
+      setCommentDareId(null);
+    } catch (error) {
+      console.error('[Home] Dare comment error:', error);
+      Alert.alert('Comment failed', 'Please try again.');
+    } finally {
+      setCommentSubmitting(false);
+    }
+  };
+
+  const handleShare = async (dare: MockDare) => {
+    try {
+      await Share.share({
+        message: `🔥 DareMe Challenge: ${dare.title}\n\nTake this dare in DareMe!`,
+      });
+    } catch (error) {
+      console.error('[Home] Dare share error:', error);
+    }
+  };
+
+  const handleDelete = (dareId: string) => {
+    Alert.alert(
+      'Delete dare?',
+      'This will permanently remove your dare and its social activity.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const { error: deleteError } = await supabase
+              .from('dares')
+              .delete()
+              .eq('id', dareId)
+              .eq('creator_id', currentUserId ?? '');
+
+            if (deleteError) {
+              console.error('[Home] Dare delete error:', deleteError);
+              Alert.alert('Delete failed', 'Please try again.');
+              return;
+            }
+
+            setDares((current) => current.filter((dare) => dare.id !== dareId));
+            setLikeCounts((current) => {
+              const next = { ...current };
+              delete next[dareId];
+              return next;
+            });
+            setCommentCounts((current) => {
+              const next = { ...current };
+              delete next[dareId];
+              return next;
+            });
+            setLikedDares((current) => {
+              const next = new Set(current);
+              next.delete(dareId);
+              return next;
+            });
+          },
+        },
+      ],
+    );
+  };
+
   return (
+    <>
     <Screen>
       <AppHeader
   title="DareMe"
@@ -352,20 +575,28 @@ useEffect(() => {
               dare={dare}
               loading={takingDare === dare.id}
               inProgress={inProgressDares.has(dare.id)}
+              likeCount={likeCounts[dare.id] ?? 0}
+              commentCount={commentCounts[dare.id] ?? 0}
+              likedByMe={likedDares.has(dare.id)}
+              onLike={() => handleLike(dare.id)}
+              onComment={() => handleComment(dare.id)}
+              onShare={() => handleShare(dare)}
+              isOwner={dare.creatorId === currentUserId}
+              onDelete={() => handleDelete(dare.id)}
               onPress={() => {
-  if (inProgressDares.has(dare.id)) {
-    router.replace('/(tabs)/dares');
-    return;
-  }
+                if (inProgressDares.has(dare.id)) {
+                  router.replace('/(tabs)/dares');
+                  return;
+                }
 
-  router.push({
-    pathname: '/dare-detail',
-    params: { id: dare.id },
-  });
-}}
+                router.push({
+                  pathname: '/dare-detail',
+                  params: { id: dare.id },
+                });
+              }}
               onPrimaryAction={() => {
-  handleTakeDare(dare.id);
-}}
+                handleTakeDare(dare.id);
+              }}
             />
           ))}
 
@@ -395,6 +626,63 @@ useEffect(() => {
         />
       )}
     </Screen>
+
+    <Modal
+      visible={commentDareId !== null}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setCommentDareId(null)}
+    >
+      <KeyboardAvoidingView
+        style={styles.modalBackdrop}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Pressable
+          style={styles.modalBackdropPressable}
+          onPress={() => setCommentDareId(null)}
+        />
+
+        <View style={styles.commentSheet}>
+          <View style={styles.commentHandle} />
+          <Text style={styles.commentTitle}>Add a comment</Text>
+
+          <TextInput
+            value={commentText}
+            onChangeText={setCommentText}
+            placeholder="Write something..."
+            placeholderTextColor={colors.secondaryText}
+            multiline
+            maxLength={1000}
+            style={styles.commentInput}
+            autoFocus
+          />
+
+          <View style={styles.commentActions}>
+            <Pressable
+              onPress={() => setCommentDareId(null)}
+              style={styles.commentCancelButton}
+            >
+              <Text style={styles.commentCancelText}>Cancel</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={handleSubmitComment}
+              disabled={commentSubmitting || !commentText.trim()}
+              style={[
+                styles.commentSubmitButton,
+                (commentSubmitting || !commentText.trim()) &&
+                  styles.commentSubmitButtonDisabled,
+              ]}
+            >
+              <Text style={styles.commentSubmitText}>
+                {commentSubmitting ? 'Posting...' : 'Post Comment'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+    </>
   );
 }
 
@@ -534,6 +822,94 @@ menuLine: {
   },
 
   discoverButtonText: {
+    color: colors.background,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  },
+
+  modalBackdropPressable: {
+...StyleSheet.absoluteFill,  },
+
+  commentSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xl,
+  },
+
+  commentHandle: {
+    alignSelf: 'center',
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    marginBottom: spacing.md,
+  },
+
+  commentTitle: {
+    color: colors.primaryText,
+    fontSize: fontSize.lg,
+    fontWeight: '700',
+    marginBottom: spacing.md,
+  },
+
+  commentInput: {
+    minHeight: 110,
+    maxHeight: 180,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    color: colors.primaryText,
+    backgroundColor: colors.surfaceElevated,
+    textAlignVertical: 'top',
+    fontSize: fontSize.md,
+  },
+
+  commentActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+
+  commentCancelButton: {
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  commentCancelText: {
+    color: colors.secondaryText,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+  },
+
+  commentSubmitButton: {
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 22,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  commentSubmitButtonDisabled: {
+    opacity: 0.45,
+  },
+
+  commentSubmitText: {
     color: colors.background,
     fontSize: fontSize.sm,
     fontWeight: '700',

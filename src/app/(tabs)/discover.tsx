@@ -1,5 +1,9 @@
 import { useEvent } from 'expo';
-import { useRouter } from 'expo-router';
+import {
+  useFocusEffect,
+  useRouter,
+} from 'expo-router';
+
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -136,6 +140,7 @@ export default function DiscoverScreen() {
   const [takingDare, setTakingDare] =
     useState<string | null>(null);
   const [scrollY, setScrollY] = useState(0);
+  const [screenFocused, setScreenFocused] = useState(true);
 
   const [commentPost, setCommentPost] =
     useState<FeedPost | null>(null);
@@ -373,14 +378,24 @@ export default function DiscoverScreen() {
 
     setDaresLoading(false);
   }, []);
+useEffect(() => {
+  loadPosts();
+  loadDares();
+}, [loadPosts, loadDares]);
 
-  useEffect(() => {
-    loadPosts();
-    loadDares();
-  }, [loadPosts, loadDares]);
+  useFocusEffect(
+    useCallback(() => {
+      setScreenFocused(true);
+
+      return () => {
+        setScreenFocused(false);
+      };
+    }, []),
+  );
 
   /* ===================================================== */
   /* LIKE                                                  */
+  /* ===================================================== */
   /* ===================================================== */
 
   const handleLike = async (
@@ -819,17 +834,14 @@ export default function DiscoverScreen() {
         </Text>
       ) : posts.length > 0 ? (
         <View style={styles.feed}>
-          {posts.map((post) => (
+                    {posts.map((post) => (
             <PostCard
               key={post.id}
               post={post}
-              onLike={() =>
-                handleLike(post)
-              }
-              onComment={() =>
-                loadComments(post)
-              }
+              onLike={() => handleLike(post)}
+              onComment={() => loadComments(post)}
               scrollY={scrollY}
+              screenFocused={screenFocused}
             />
           ))}
         </View>
@@ -943,12 +955,14 @@ function PostCard({
   post,
   onLike,
   onComment,
-  scrollY,
+ scrollY,
+screenFocused,
 }: {
   post: FeedPost;
   onLike: () => void;
   onComment: () => void;
   scrollY: number;
+  screenFocused: boolean;
 }) {
   const router = useRouter();
 
@@ -1057,9 +1071,10 @@ function PostCard({
       ) : null}
       {isVideo ? (
   <PostVideo
-    uri={post.signedMediaUrl!}
-    scrollY={scrollY}
-  />
+  uri={post.signedMediaUrl!}
+  scrollY={scrollY}
+  screenFocused={screenFocused}
+/>
 ) : null}
 
       {/* Text-only indicator */}
@@ -1172,11 +1187,14 @@ function PostCard({
 function PostVideo({
   uri,
   scrollY,
+  screenFocused,
 }: {
   uri: string;
   scrollY: number;
+  screenFocused: boolean;
 }) {
   const [muted, setMuted] = useState(true);
+
   const videoRef = useRef<View>(null);
   const isVisibleRef = useRef(false);
 
@@ -1189,43 +1207,102 @@ function PostVideo({
     status: player.status,
   });
 
+  
   const updatePlayback = useCallback(() => {
-    videoRef.current?.measureInWindow((x, y, width, height) => {
-      const viewportHeight = Dimensions.get('window').height;
-      const visibleTop = Math.max(y, 0);
-      const visibleBottom = Math.min(y + height, viewportHeight);
-      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
-      const visibleRatio = height > 0 ? visibleHeight / height : 0;
-      const shouldPlay = visibleRatio >= 0.5;
+    videoRef.current?.measureInWindow(
+      (_x, y, _width, height) => {
+        const viewportHeight =
+          Dimensions.get('window').height;
 
-      if (shouldPlay === isVisibleRef.current) {
-        return;
-      }
-
-      isVisibleRef.current = shouldPlay;
-
-      if (shouldPlay) {
-        player.muted = muted;
-        if (status === 'readyToPlay') {
-          player.play();
+        if (height <= 0 || viewportHeight <= 0) {
+          player.pause();
+          isVisibleRef.current = false;
+          return;
         }
-      } else {
-        player.pause();
-      }
-    });
-  }, [muted, player, status, scrollY]);
 
+        const visibleTop = Math.max(y, 0);
+        const visibleBottom = Math.min(
+          y + height,
+          viewportHeight,
+        );
+
+        const visibleHeight = Math.max(
+          0,
+          visibleBottom - visibleTop,
+        );
+
+        const visibleRatio =
+          visibleHeight / height;
+
+        const shouldPlay =
+          visibleRatio >= 0.5;
+          if (Platform.OS === 'web') {
+  player.muted = true;
+} 
+
+        isVisibleRef.current =
+          shouldPlay;
+
+        if (
+          shouldPlay &&
+          status === 'readyToPlay'
+        ) {
+          player.muted = muted;
+          player.play();
+        } else {
+          player.pause();
+        }
+      },
+    );
+  }, [
+    muted,
+    player,
+    status,
+    scrollY,
+  ]);
+
+    useEffect(() => {
+    if (!screenFocused) {
+      player.pause();
+      isVisibleRef.current = false;
+      return;
+    }
+
+    updatePlayback();
+  }, [
+    screenFocused,
+    player,
+    updatePlayback,
+  ]);
   useEffect(() => {
-    const timer = setTimeout(updatePlayback, 50);
-    return () => clearTimeout(timer);
+    const timer = setTimeout(() => {
+      updatePlayback();
+    }, 50);
+
+    return () => {
+      clearTimeout(timer);
+    };
   }, [updatePlayback]);
 
+  /*
+   * When video becomes ready, immediately
+   * check whether it is currently visible.
+   */
   useEffect(() => {
     if (status === 'readyToPlay') {
-      updatePlayback();
+      const timer = setTimeout(() => {
+        updatePlayback();
+      }, 50);
+
+      return () => {
+        clearTimeout(timer);
+      };
     }
   }, [status, updatePlayback]);
 
+  /*
+   * Always pause when component unmounts.
+   */
   useEffect(() => {
     return () => {
       player.pause();
@@ -1234,12 +1311,16 @@ function PostVideo({
 
   const toggleMute = () => {
     const nextMuted = !muted;
+
     player.muted = nextMuted;
     setMuted(nextMuted);
   };
 
   return (
-    <View ref={videoRef} style={styles.videoContainer}>
+    <View
+      ref={videoRef}
+      style={styles.videoContainer}
+    >
       <VideoView
         player={player}
         style={styles.postVideo}
@@ -1253,17 +1334,20 @@ function PostVideo({
         style={styles.videoMuteButton}
         accessibilityRole="button"
         accessibilityLabel={
-          muted ? 'Unmute video' : 'Mute video'
+          muted
+            ? 'Unmute video'
+            : 'Mute video'
         }
       >
-        <Text style={styles.videoMuteText}>
+        <Text
+          style={styles.videoMuteText}
+        >
           {muted ? '🔇' : '🔊'}
         </Text>
       </Pressable>
     </View>
   );
 }
-
 function CommentModal({
   visible,
   post,
