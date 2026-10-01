@@ -268,27 +268,43 @@ useEffect(() => {
   return (
     <Screen>
       <AppHeader
-        title="DareMe"
-        showAvatar
-        onAvatarPress={() => router.push('./me')}
-        rightSlot={
-          <View style={styles.headerActions}>
-            {/* Search */}
-            <Pressable
-              onPress={() => router.push('/search')}
-              style={styles.iconButton}
-              accessibilityRole="button"
-              accessibilityLabel="Search"
-              hitSlop={10}
-            >
-              <Text style={styles.searchIcon}>⌕</Text>
-            </Pressable>
+  title="DareMe"
+  leftSlot={
+    <Pressable
+      onPress={() => {
+        // Menu will be connected in the next Home step.
+      }}
+      style={styles.iconButton}
+      accessibilityRole="button"
+      accessibilityLabel="Open menu"
+      hitSlop={10}
+    >
+      <View style={styles.menuIcon}>
+        <View style={styles.menuLine} />
+        <View style={styles.menuLine} />
+        <View style={styles.menuLine} />
+      </View>
+    </Pressable>
+  }
+  rightSlot={
+    <View style={styles.headerActions}>
+      <NotificationBell />
 
-            {/* Notifications */}
-            <NotificationBell />
-          </View>
-        }
-      />
+      <Pressable
+        onPress={() => router.push('/search')}
+        style={styles.iconButton}
+        accessibilityRole="button"
+        accessibilityLabel="Search"
+        hitSlop={10}
+      >
+        <View style={styles.searchIcon}>
+          <View style={styles.searchCircle} />
+          <View style={styles.searchHandle} />
+        </View>
+      </Pressable>
+    </View>
+  }
+/>
 
       <SectionHeader title="For You" />
 
@@ -398,12 +414,46 @@ const styles = StyleSheet.create({
   },
 
   searchIcon: {
-    color: colors.primaryText,
-    fontSize: 28,
-    lineHeight: 30,
-    fontWeight: '500',
-  },
+  width: 22,
+  height: 22,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
 
+searchCircle: {
+  width: 13,
+  height: 13,
+  borderWidth: 2,
+  borderColor: colors.primaryText,
+  borderRadius: 7,
+  position: 'absolute',
+  top: 1,
+  left: 1,
+},
+
+searchHandle: {
+  width: 8,
+  height: 2,
+  backgroundColor: colors.primaryText,
+  borderRadius: 1,
+  position: 'absolute',
+  transform: [{ rotate: '45deg' }],
+  right: 0,
+  bottom: 3,
+},
+
+menuIcon: {
+  width: 22,
+  height: 18,
+  justifyContent: 'space-between',
+},
+
+menuLine: {
+  width: 22,
+  height: 2,
+  backgroundColor: colors.primaryText,
+  borderRadius: 1,
+},
   feed: {
     paddingBottom: spacing.xl,
   },
