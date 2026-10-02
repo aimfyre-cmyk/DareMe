@@ -893,11 +893,11 @@ useEffect(() => {
       onPress: () => router.push('/saved'),
     },
     {
-      title: 'My Activity',
-      subtitle: 'Your DareMe activity',
-      icon: '',
-      onPress: () => {},
-    },
+  title: 'My Activity',
+  subtitle: 'Your DareMe activity',
+  icon: '',
+  onPress: () => router.push('/my-activity'),
+},
     {
       title: 'Friends / Following',
       subtitle: 'People you follow',
