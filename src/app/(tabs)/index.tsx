@@ -7,6 +7,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   Share,
   StyleSheet,
   Text,
@@ -14,9 +15,11 @@ import {
   View,
 } from 'react-native';
 
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { AppHeader } from '../../components/AppHeader';
 import { DareCard, MockDare } from '../../components/DareCard';
 import { EmptyState } from '../../components/EmptyState';
+import { HomeMenu } from '../../components/HomeMenu';
 import { NotificationBell } from '../../components/NotificationBell';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
@@ -70,6 +73,26 @@ function formatProofType(value: string): MockDare['proofType'] {
   return 'Text';
 }
 
+
+type LikeUser = {
+  id: string;
+  displayName: string;
+  username: string | null;
+};
+
+type DareComment = {
+  id: string;
+  dareId: string;
+  userId: string;
+  content: string;
+  parentCommentId: string | null;
+  createdAt: string;
+  displayName: string;
+  username: string | null;
+  likeCount: number;
+  likedByMe: boolean;
+};
+
 export default function HomeScreen() {
   const [dares, setDares] = useState<HomeDare[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,6 +101,10 @@ export default function HomeScreen() {
   const [inProgressDares, setInProgressDares] = useState<Set<string>>(
     new Set(),
   );
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [savedDares, setSavedDares] = useState<Set<string>>(
+  new Set(),
+);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
   const [likedDares, setLikedDares] = useState<Set<string>>(new Set());
@@ -85,6 +112,12 @@ export default function HomeScreen() {
   const [commentDareId, setCommentDareId] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [comments, setComments] = useState<DareComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [replyToComment, setReplyToComment] = useState<DareComment | null>(null);
+  const [likeUsers, setLikeUsers] = useState<LikeUser[]>([]);
+  const [likeUsersDareId, setLikeUsersDareId] = useState<string | null>(null);
+  const [likeUsersLoading, setLikeUsersLoading] = useState(false);
 
   const loadDares = useCallback(async () => {
     try {
@@ -185,6 +218,45 @@ export default function HomeScreen() {
   }, [loadDares]);
 
 useEffect(() => {
+  const loadSavedDares = async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setSavedDares(new Set());
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('saved_dares')
+        .select('dare_id')
+        .eq('user_id', user.id);
+
+      if (error) {
+        throw error;
+      }
+
+      setSavedDares(
+        new Set(
+          (data ?? []).map(
+            (item) => item.dare_id,
+          ),
+        ),
+      );
+    } catch (error) {
+      console.error(
+        '[Home] Failed to load saved dares:',
+        error,
+      );
+
+      setSavedDares(new Set());
+    }
+  };
+
+  loadSavedDares();
+}, []);
   const loadInProgressDares = async () => {
     try {
       const {
@@ -224,9 +296,67 @@ useEffect(() => {
   };
 
   loadInProgressDares();
-}, []);
+
 
   const hasDares = dares.length > 0;
+  const handleSaveDare = async (dareId: string) => {
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      throw new Error(
+        'Please log in before saving a dare.',
+      );
+    }
+
+    const isSaved = savedDares.has(dareId);
+
+    if (isSaved) {
+      const { error } = await supabase
+        .from('saved_dares')
+        .delete()
+        .eq('dare_id', dareId)
+        .eq('user_id', user.id);
+
+      if (error) {
+        throw error;
+      }
+
+      setSavedDares((current) => {
+        const next = new Set(current);
+        next.delete(dareId);
+        return next;
+      });
+
+      return;
+    }
+
+    const { error } = await supabase
+      .from('saved_dares')
+      .insert({
+        dare_id: dareId,
+        user_id: user.id,
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    setSavedDares((current) => {
+      const next = new Set(current);
+      next.add(dareId);
+      return next;
+    });
+  } catch (error) {
+    console.error(
+      '[Home] Save dare error:',
+      error,
+    );
+  }
+};
   const handleTakeDare = async (dareId: string) => {
   console.log('[Home] TAKE THE DARE:', dareId);
   setTakingDare(dareId);
@@ -389,8 +519,184 @@ useEffect(() => {
     }
   };
 
+  const loadDareComments = useCallback(
+    async (dareId: string) => {
+      try {
+        setCommentsLoading(true);
+
+        const { data: commentRows, error: commentsError } = await supabase
+          .from('dare_comments')
+          .select(
+            'id,dare_id,user_id,content,parent_comment_id,created_at',
+          )
+          .eq('dare_id', dareId)
+          .order('created_at', { ascending: true });
+
+        if (commentsError) {
+          throw commentsError;
+        }
+
+        const rows = commentRows ?? [];
+        const userIds = [...new Set(rows.map((row) => row.user_id))];
+        const commentIds = rows.map((row) => row.id);
+
+        const profilesResult =
+          userIds.length > 0
+            ? await supabase
+                .from('profiles')
+                .select('id,username,display_name')
+                .in('id', userIds)
+            : { data: [], error: null };
+
+        if (profilesResult.error) {
+          throw profilesResult.error;
+        }
+
+        const likesResult =
+          commentIds.length > 0
+            ? await supabase
+                .from('dare_comment_likes')
+                .select('comment_id,user_id')
+                .in('comment_id', commentIds)
+            : { data: [], error: null };
+
+        if (likesResult.error) {
+          throw likesResult.error;
+        }
+
+        const profileMap = new Map<string, { username: string | null; display_name: string | null }>();
+        for (const profile of (profilesResult.data ?? []) as Array<{
+          id: string;
+          username: string | null;
+          display_name: string | null;
+        }>) {
+          profileMap.set(profile.id, profile);
+        }
+
+        const likeRows = likesResult.data ?? [];
+        const mappedComments: DareComment[] = rows.map((row) => {
+          const profile = profileMap.get(row.user_id);
+          const commentLikes = likeRows.filter(
+            (like) => like.comment_id === row.id,
+          );
+
+          return {
+            id: row.id,
+            dareId: row.dare_id,
+            userId: row.user_id,
+            content: row.content,
+            parentCommentId: row.parent_comment_id ?? null,
+            createdAt: row.created_at,
+            displayName:
+              profile?.display_name ||
+              profile?.username ||
+              'DareMe User',
+            username: profile?.username ?? null,
+            likeCount: commentLikes.length,
+            likedByMe:
+              currentUserId !== null &&
+              commentLikes.some(
+                (like) => like.user_id === currentUserId,
+              ),
+          };
+        });
+
+        setComments(mappedComments);
+        setCommentCounts((current) => ({
+          ...current,
+          [dareId]: mappedComments.length,
+        }));
+      } catch (error) {
+        console.error('[Home] Load dare comments error:', error);
+        Alert.alert('Comments unavailable', 'Could not load comments right now.');
+      } finally {
+        setCommentsLoading(false);
+      }
+    },
+    [currentUserId],
+  );
+
+  const handleLikeCountPress = async (dareId: string) => {
+    try {
+      setLikeUsersLoading(true);
+      setLikeUsersDareId(dareId);
+
+      const { data: likes, error: likesError } = await supabase
+        .from('dare_likes')
+        .select('user_id')
+        .eq('dare_id', dareId);
+
+      if (likesError) {
+        throw likesError;
+      }
+
+      const userIds = Array.from(
+        new Set<string>(
+          (likes ?? []).map(
+            (like: { user_id: string }) => like.user_id,
+          ),
+        ),
+      );
+
+      if (userIds.length === 0) {
+        setLikeUsers([]);
+        return;
+      }
+
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id,username,display_name')
+        .in('id', userIds);
+
+      if (profilesError) {
+        throw profilesError;
+      }
+
+      const profileMap = new Map<string, {
+        id: string;
+        username: string | null;
+        display_name: string | null;
+      }>();
+
+      for (const profile of (profiles ?? []) as Array<{
+        id: string;
+        username: string | null;
+        display_name: string | null;
+      }>) {
+        profileMap.set(profile.id, profile);
+      }
+
+      setLikeUsers(
+        userIds.map((userId) => {
+          const profile = profileMap.get(userId);
+          return {
+            id: userId,
+            displayName:
+              profile?.display_name ||
+              profile?.username ||
+              'DareMe User',
+            username: profile?.username ?? null,
+          };
+        }),
+      );
+    } catch (error) {
+      console.error('[Home] Load dare like users error:', error);
+      Alert.alert('Likes unavailable', 'Could not load the people who liked this dare.');
+      setLikeUsersDareId(null);
+    } finally {
+      setLikeUsersLoading(false);
+    }
+  };
+
   const handleComment = (dareId: string) => {
     setCommentDareId(dareId);
+    setCommentText('');
+    setReplyToComment(null);
+    void loadDareComments(dareId);
+  };
+
+  const handleReply = (comment: DareComment) => {
+    setReplyToComment(comment);
     setCommentText('');
   };
 
@@ -413,23 +719,67 @@ useEffect(() => {
           dare_id: commentDareId,
           user_id: currentUserId,
           content,
+          parent_comment_id: replyToComment?.id ?? null,
         });
 
       if (insertError) {
         throw insertError;
       }
 
-      setCommentCounts((current) => ({
-        ...current,
-        [commentDareId]: (current[commentDareId] ?? 0) + 1,
-      }));
       setCommentText('');
-      setCommentDareId(null);
+      setReplyToComment(null);
+      await loadDareComments(commentDareId);
     } catch (error) {
       console.error('[Home] Dare comment error:', error);
       Alert.alert('Comment failed', 'Please try again.');
     } finally {
       setCommentSubmitting(false);
+    }
+  };
+
+  const handleCommentLike = async (commentId: string) => {
+    if (!currentUserId) {
+      Alert.alert('Login required', 'Please log in to like a comment.');
+      return;
+    }
+
+    const target = comments.find((comment) => comment.id === commentId);
+    if (!target) {
+      return;
+    }
+
+    const alreadyLiked = target.likedByMe;
+
+    setComments((current) =>
+      current.map((comment) =>
+        comment.id === commentId
+          ? {
+              ...comment,
+              likedByMe: !alreadyLiked,
+              likeCount: Math.max(
+                0,
+                comment.likeCount + (alreadyLiked ? -1 : 1),
+              ),
+            }
+          : comment,
+      ),
+    );
+
+    const result = alreadyLiked
+      ? await supabase
+          .from('dare_comment_likes')
+          .delete()
+          .eq('comment_id', commentId)
+          .eq('user_id', currentUserId)
+      : await supabase.from('dare_comment_likes').insert({
+          comment_id: commentId,
+          user_id: currentUserId,
+        });
+
+    if (result.error) {
+      console.error('[Home] Dare comment like error:', result.error);
+      await loadDareComments(commentDareId ?? target.dareId);
+      Alert.alert('Like failed', 'Please try again.');
     }
   };
 
@@ -494,9 +844,7 @@ useEffect(() => {
   title="DareMe"
   leftSlot={
     <Pressable
-      onPress={() => {
-        // Menu will be connected in the next Home step.
-      }}
+      onPress={() => setMenuVisible(true)}
       style={styles.iconButton}
       accessibilityRole="button"
       accessibilityLabel="Open menu"
@@ -528,7 +876,60 @@ useEffect(() => {
     </View>
   }
 />
-
+<HomeMenu
+  visible={menuVisible}
+  onClose={() => setMenuVisible(false)}
+  items={[
+    {
+      title: 'My Dares',
+      subtitle: 'Dares you created',
+      icon: '',
+      onPress: () => router.replace('/(tabs)/dares'),
+    },
+    {
+      title: 'Saved',
+      subtitle: 'Your saved content',
+      icon: '',
+      onPress: () => router.push('/saved'),
+    },
+    {
+      title: 'My Activity',
+      subtitle: 'Your DareMe activity',
+      icon: '',
+      onPress: () => {},
+    },
+    {
+      title: 'Friends / Following',
+      subtitle: 'People you follow',
+      icon: '',
+      onPress: () => {},
+    },
+    {
+      title: 'Invite Friends',
+      subtitle: 'Invite people to DareMe',
+      icon: '',
+      onPress: () => {},
+    },
+    {
+      title: 'Leaderboard',
+      subtitle: 'Compete in DareMe',
+      icon: '🏆',
+      onPress: () => {},
+    },
+    {
+      title: 'Global Ranking',
+      subtitle: 'See your worldwide XP rank',
+      icon: '',
+      onPress: () => {},
+    },
+    {
+      title: 'Rewards',
+      subtitle: 'XP, badges and rewards',
+      icon: '',
+      onPress: () => {},
+    },
+  ]}
+/>
       <SectionHeader title="For You" />
 
       {loading ? (
@@ -579,6 +980,7 @@ useEffect(() => {
               commentCount={commentCounts[dare.id] ?? 0}
               likedByMe={likedDares.has(dare.id)}
               onLike={() => handleLike(dare.id)}
+              onLikeCountPress={() => handleLikeCountPress(dare.id)}
               onComment={() => handleComment(dare.id)}
               onShare={() => handleShare(dare)}
               isOwner={dare.creatorId === currentUserId}
@@ -597,6 +999,8 @@ useEffect(() => {
               onPrimaryAction={() => {
                 handleTakeDare(dare.id);
               }}
+              savedByMe={savedDares.has(dare.id)}
+onSave={() => handleSaveDare(dare.id)}
             />
           ))}
 
@@ -631,7 +1035,10 @@ useEffect(() => {
       visible={commentDareId !== null}
       transparent
       animationType="slide"
-      onRequestClose={() => setCommentDareId(null)}
+      onRequestClose={() => {
+        setCommentDareId(null);
+        setReplyToComment(null);
+      }}
     >
       <KeyboardAvoidingView
         style={styles.modalBackdrop}
@@ -639,30 +1046,110 @@ useEffect(() => {
       >
         <Pressable
           style={styles.modalBackdropPressable}
-          onPress={() => setCommentDareId(null)}
+          onPress={() => {
+            setCommentDareId(null);
+            setReplyToComment(null);
+          }}
         />
 
         <View style={styles.commentSheet}>
           <View style={styles.commentHandle} />
-          <Text style={styles.commentTitle}>Add a comment</Text>
+          <View style={styles.commentHeaderRow}>
+            <Text style={styles.commentTitle}>Comments</Text>
+            <Pressable
+              onPress={() => {
+                if (commentDareId) {
+                  void loadDareComments(commentDareId);
+                }
+              }}
+              hitSlop={10}
+            >
+              <Ionicons
+                name="refresh-outline"
+                size={21}
+                color={colors.primaryText}
+              />
+            </Pressable>
+          </View>
+
+          <ScrollView
+            style={styles.commentsList}
+            contentContainerStyle={styles.commentsListContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            {commentsLoading ? (
+              <View style={styles.commentsState}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={styles.commentsStateText}>Loading comments...</Text>
+              </View>
+            ) : comments.filter((comment) => !comment.parentCommentId).length === 0 ? (
+              <View style={styles.commentsState}>
+                <Ionicons
+                  name="chatbubble-ellipses-outline"
+                  size={30}
+                  color={colors.secondaryText}
+                />
+                <Text style={styles.commentsStateText}>
+                  No comments yet. Be the first.
+                </Text>
+              </View>
+            ) : (
+              comments
+                .filter((comment) => !comment.parentCommentId)
+                .map((comment) => (
+                  <DareCommentItem
+                    key={comment.id}
+                    comment={comment}
+                    replies={comments.filter(
+                      (reply) => reply.parentCommentId === comment.id,
+                    )}
+                    onLike={handleCommentLike}
+                    onReply={handleReply}
+                  />
+                ))
+            )}
+          </ScrollView>
+
+          {replyToComment ? (
+            <View style={styles.replyingBar}>
+              <Text style={styles.replyingText} numberOfLines={1}>
+                Replying to {replyToComment.displayName}
+              </Text>
+              <Pressable
+                onPress={() => setReplyToComment(null)}
+                hitSlop={10}
+              >
+                <Ionicons
+                  name="close-circle"
+                  size={20}
+                  color={colors.secondaryText}
+                />
+              </Pressable>
+            </View>
+          ) : null}
 
           <TextInput
             value={commentText}
             onChangeText={setCommentText}
-            placeholder="Write something..."
+            placeholder={
+              replyToComment ? 'Write a reply...' : 'Write a comment...'
+            }
             placeholderTextColor={colors.secondaryText}
             multiline
             maxLength={1000}
             style={styles.commentInput}
-            autoFocus
           />
 
           <View style={styles.commentActions}>
             <Pressable
-              onPress={() => setCommentDareId(null)}
+              onPress={() => {
+                setCommentDareId(null);
+                setReplyToComment(null);
+              }}
               style={styles.commentCancelButton}
             >
-              <Text style={styles.commentCancelText}>Cancel</Text>
+              <Text style={styles.commentCancelText}>Close</Text>
             </Pressable>
 
             <Pressable
@@ -675,14 +1162,215 @@ useEffect(() => {
               ]}
             >
               <Text style={styles.commentSubmitText}>
-                {commentSubmitting ? 'Posting...' : 'Post Comment'}
+                {commentSubmitting
+                  ? 'Posting...'
+                  : replyToComment
+                    ? 'Post Reply'
+                    : 'Post Comment'}
               </Text>
             </Pressable>
           </View>
         </View>
       </KeyboardAvoidingView>
     </Modal>
+
+    <Modal
+      visible={likeUsersDareId !== null}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setLikeUsersDareId(null)}
+    >
+      <View style={styles.likeUsersBackdrop}>
+        <Pressable
+          style={styles.likeUsersBackdropPressable}
+          onPress={() => setLikeUsersDareId(null)}
+        />
+        <View style={styles.likeUsersSheet}>
+          <View style={styles.commentHeaderRow}>
+            <Text style={styles.commentTitle}>Liked by</Text>
+            <Pressable
+              onPress={() => setLikeUsersDareId(null)}
+              hitSlop={10}
+            >
+              <Ionicons
+                name="close"
+                size={24}
+                color={colors.primaryText}
+              />
+            </Pressable>
+          </View>
+
+          {likeUsersLoading ? (
+            <View style={styles.commentsState}>
+              <ActivityIndicator size="small" color={colors.accent} />
+              <Text style={styles.commentsStateText}>Loading...</Text>
+            </View>
+          ) : (
+            <ScrollView
+              style={styles.likeUsersList}
+              contentContainerStyle={styles.likeUsersListContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {likeUsers.length === 0 ? (
+                <Text style={styles.commentsStateText}>No likes yet.</Text>
+              ) : (
+                likeUsers.map((user) => (
+                  <View key={user.id} style={styles.likeUserRow}>
+                    <View style={styles.likeUserAvatar}>
+                      <Text style={styles.likeUserAvatarText}>
+                        {user.displayName.charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={styles.likeUserInfo}>
+                      <Text style={styles.likeUserName}>
+                        {user.displayName}
+                      </Text>
+                      {user.username ? (
+                        <Text style={styles.likeUserUsername}>
+                          @{user.username}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Ionicons
+                      name="heart"
+                      size={18}
+                      color="#FF4D67"
+                    />
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </Modal>
     </>
+  );
+}
+
+
+function DareCommentItem({
+  comment,
+  replies,
+  onLike,
+  onReply,
+}: {
+  comment: DareComment;
+  replies: DareComment[];
+  onLike: (commentId: string) => void | Promise<void>;
+  onReply: (comment: DareComment) => void;
+}) {
+  return (
+    <View style={styles.commentBlock}>
+      <View style={styles.commentRow}>
+        <View style={styles.commentAvatar}>
+          <Text style={styles.commentAvatarText}>
+            {comment.displayName.charAt(0).toUpperCase()}
+          </Text>
+        </View>
+
+        <View style={styles.commentBody}>
+          <Text style={styles.commentUserName}>
+            {comment.displayName}
+          </Text>
+          {comment.username ? (
+            <Text style={styles.commentUsername}>
+              @{comment.username}
+            </Text>
+          ) : null}
+          <Text style={styles.commentContent}>
+            {comment.content}
+          </Text>
+
+          <View style={styles.commentMetaRow}>
+            <Pressable
+              onPress={() => onLike(comment.id)}
+              style={styles.commentMetaButton}
+              hitSlop={6}
+            >
+              <Ionicons
+                name={comment.likedByMe ? 'heart' : 'heart-outline'}
+                size={17}
+                color={comment.likedByMe ? '#FF4D67' : colors.secondaryText}
+              />
+              {comment.likeCount > 0 ? (
+                <Text
+                  style={[
+                    styles.commentMetaText,
+                    comment.likedByMe && styles.commentLikedText,
+                  ]}
+                >
+                  {comment.likeCount}
+                </Text>
+              ) : null}
+            </Pressable>
+
+            <Pressable
+              onPress={() => onReply(comment)}
+              style={styles.commentMetaButton}
+              hitSlop={6}
+            >
+              <Ionicons
+                name="return-down-forward-outline"
+                size={17}
+                color={colors.secondaryText}
+              />
+              <Text style={styles.commentMetaText}>Reply</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+
+      {replies.length > 0 ? (
+        <View style={styles.repliesContainer}>
+          {replies.map((reply) => (
+            <View key={reply.id} style={styles.replyRow}>
+              <View style={styles.replyAvatar}>
+                <Text style={styles.replyAvatarText}>
+                  {reply.displayName.charAt(0).toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.commentBody}>
+                <Text style={styles.commentUserName}>
+                  {reply.displayName}
+                </Text>
+                {reply.username ? (
+                  <Text style={styles.commentUsername}>
+                    @{reply.username}
+                  </Text>
+                ) : null}
+                <Text style={styles.commentContent}>
+                  {reply.content}
+                </Text>
+                <View style={styles.commentMetaRow}>
+                  <Pressable
+                    onPress={() => onLike(reply.id)}
+                    style={styles.commentMetaButton}
+                    hitSlop={6}
+                  >
+                    <Ionicons
+                      name={reply.likedByMe ? 'heart' : 'heart-outline'}
+                      size={17}
+                      color={reply.likedByMe ? '#FF4D67' : colors.secondaryText}
+                    />
+                    {reply.likeCount > 0 ? (
+                      <Text
+                        style={[
+                          styles.commentMetaText,
+                          reply.likedByMe && styles.commentLikedText,
+                        ]}
+                      >
+                        {reply.likeCount}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -834,7 +1522,217 @@ menuLine: {
   },
 
   modalBackdropPressable: {
-...StyleSheet.absoluteFill,  },
+    ...StyleSheet.absoluteFill,
+  },
+
+  commentHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  commentsList: {
+    maxHeight: 390,
+  },
+
+  commentsListContent: {
+    paddingBottom: spacing.sm,
+  },
+
+  commentsState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xl,
+    gap: spacing.sm,
+  },
+
+  commentsStateText: {
+    color: colors.secondaryText,
+    fontSize: fontSize.sm,
+    textAlign: 'center',
+  },
+
+  commentBlock: {
+    paddingVertical: spacing.sm,
+  },
+
+  commentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+
+  commentAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+
+  commentAvatarText: {
+    color: colors.primaryText,
+    fontWeight: '700',
+  },
+
+  commentBody: {
+    flex: 1,
+  },
+
+  commentUserName: {
+    color: colors.primaryText,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+
+  commentUsername: {
+    color: colors.secondaryText,
+    fontSize: 11,
+    marginTop: 1,
+  },
+
+  commentContent: {
+    color: colors.primaryText,
+    fontSize: fontSize.sm,
+    lineHeight: 20,
+    marginTop: spacing.xs,
+  },
+
+  commentMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: spacing.xs,
+  },
+
+  commentMetaButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  commentMetaText: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  commentLikedText: {
+    color: '#FF4D67',
+  },
+
+  repliesContainer: {
+    marginLeft: 46,
+    borderLeftWidth: 1,
+    borderLeftColor: colors.border,
+    paddingLeft: spacing.sm,
+    marginTop: spacing.xs,
+  },
+
+  replyRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: spacing.xs,
+  },
+
+  replyAvatar: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+
+  replyAvatarText: {
+    color: colors.primaryText,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  replyingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 10,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+
+  replyingText: {
+    flex: 1,
+    color: colors.secondaryText,
+    fontSize: 12,
+    marginRight: spacing.sm,
+  },
+
+  likeUsersBackdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+  },
+
+  likeUsersBackdropPressable: {
+    ...StyleSheet.absoluteFill,
+  },
+
+  likeUsersSheet: {
+    maxHeight: '70%',
+    backgroundColor: colors.surface,
+    borderRadius: 20,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
+  },
+
+  likeUsersList: {
+    maxHeight: 420,
+  },
+
+  likeUsersListContent: {
+    paddingTop: spacing.sm,
+  },
+
+  likeUserRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+  },
+
+  likeUserAvatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+
+  likeUserAvatarText: {
+    color: colors.primaryText,
+    fontWeight: '700',
+  },
+
+  likeUserInfo: {
+    flex: 1,
+  },
+
+  likeUserName: {
+    color: colors.primaryText,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+
+  likeUserUsername: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    marginTop: 2,
+  },
 
   commentSheet: {
     backgroundColor: colors.surface,

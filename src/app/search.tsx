@@ -10,6 +10,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { AppHeader } from '../components/AppHeader';
 
 import {
   colors,
@@ -148,16 +149,20 @@ export default function SearchScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.replace('/(tabs)')}
-          style={styles.backButton}
-        >
-          <Text style={styles.backText}>‹</Text>
-        </Pressable>
-
-        <Text style={styles.headerTitle}>Search</Text>
-      </View>
+      <AppHeader
+  title="Search"
+  leftSlot={
+    <Pressable
+      onPress={() => router.replace('/(tabs)')}
+      style={styles.iconButton}
+      accessibilityRole="button"
+      accessibilityLabel="Back to Home"
+      hitSlop={10}
+    >
+      <Text style={styles.backArrow}>‹</Text>
+    </Pressable>
+  }
+/>
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -403,10 +408,68 @@ function EmptyResult({
 }
 
 const styles = StyleSheet.create({
+  backArrow: {
+  color: colors.primaryText,
+  fontSize: 34,
+  lineHeight: 36,
+},
   container: {
     flex: 1,
     backgroundColor: colors.background,
   },
+  iconButton: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+headerActions: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: spacing.xs,
+},
+
+menuIcon: {
+  width: 22,
+  gap: 4,
+},
+
+menuLine: {
+  height: 2,
+  width: 22,
+  backgroundColor: colors.primaryText,
+  borderRadius: 2,
+},
+
+searchIcon: {
+  width: 22,
+  height: 22,
+  position: 'relative',
+},
+
+searchCircle: {
+  position: 'absolute',
+  width: 14,
+  height: 14,
+  borderWidth: 2,
+  borderColor: colors.primaryText,
+  borderRadius: 7,
+  top: 1,
+  left: 1,
+},
+
+searchHandle: {
+  position: 'absolute',
+  width: 8,
+  height: 2,
+  backgroundColor: colors.primaryText,
+  borderRadius: 2,
+  transform: [{ rotate: '45deg' }],
+  top: 15,
+  left: 13,
+},
 
   header: {
     flexDirection: 'row',

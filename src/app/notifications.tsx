@@ -1,6 +1,8 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AppHeader } from '../components/AppHeader';
+import { SectionHeader } from '../components/SectionHeader';
 
 import { Screen } from '@/components/Screen';
 import { supabase } from '@/lib/supabase';
@@ -150,27 +152,22 @@ export default function NotificationsScreen() {
 
   return (
     <Screen>
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.replace('/')}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go to Home"
-        >
-          <Text style={styles.backText}>‹</Text>
-        </Pressable>
+      <AppHeader
+  title="Notifications"
+  leftSlot={
+    <Pressable
+      onPress={() => router.replace('/(tabs)')}
+      style={styles.iconButton}
+      accessibilityRole="button"
+      accessibilityLabel="Back to Home"
+      hitSlop={10}
+    >
+      <Text style={styles.backArrow}>‹</Text>
+    </Pressable>
+  }
+/>
 
-        <View style={styles.titleRow}>
-          <Text style={styles.title}>Notifications</Text>
-          {unreadCount > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{unreadCount}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.headerSpacer} />
-      </View>
+<SectionHeader title="Notifications" />
 
       {loading ? (
         <View style={styles.center}>
@@ -229,6 +226,64 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
+  iconButton: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+backArrow: {
+  color: colors.primaryText,
+  fontSize: 34,
+  lineHeight: 36,
+},
+
+headerActions: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: spacing.xs,
+},
+
+menuIcon: {
+  width: 22,
+  gap: 4,
+},
+
+menuLine: {
+  height: 2,
+  width: 22,
+  backgroundColor: colors.primaryText,
+  borderRadius: 2,
+},
+
+searchIcon: {
+  width: 22,
+  height: 22,
+  position: 'relative',
+},
+
+searchCircle: {
+  position: 'absolute',
+  width: 14,
+  height: 14,
+  borderWidth: 2,
+  borderColor: colors.primaryText,
+  borderRadius: 7,
+  top: 1,
+  left: 1,
+},
+
+searchHandle: {
+  position: 'absolute',
+  width: 8,
+  height: 2,
+  backgroundColor: colors.primaryText,
+  borderRadius: 2,
+  transform: [{ rotate: '45deg' }],
+  top: 15,
+  left: 13,
+},
   header: {
     minHeight: 64,
     flexDirection: 'row',

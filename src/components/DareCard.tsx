@@ -28,8 +28,10 @@ export type MockDare = {
 
 type DareCardProps = {
   dare: MockDare;
+
   onPress?: () => void;
   onPrimaryAction?: () => void;
+
   loading?: boolean;
   inProgress?: boolean;
 
@@ -38,8 +40,14 @@ type DareCardProps = {
   commentCount?: number;
   likedByMe?: boolean;
   onLike?: () => void;
+  onLikeCountPress?: () => void;
+
   onComment?: () => void;
   onShare?: () => void;
+
+  /* Save */
+  savedByMe?: boolean;
+  onSave?: () => void;
 
   /* Owner-only menu */
   isOwner?: boolean;
@@ -66,8 +74,12 @@ export function DareCard({
   commentCount = 0,
   likedByMe = false,
   onLike,
-  onComment,
-  onShare,
+onLikeCountPress,
+onComment,
+onShare,
+
+  savedByMe = false,
+  onSave,
 
   isOwner = false,
   onDelete,
@@ -119,7 +131,7 @@ export function DareCard({
               style={styles.menuButton}
               onPress={onDelete}
               accessibilityRole="button"
-              accessibilityLabel="Delete post"
+              accessibilityLabel="Delete dare"
               hitSlop={10}
             >
               <Ionicons
@@ -146,7 +158,7 @@ export function DareCard({
       </ImageBackground>
 
       {/* ================================================= */}
-      {/* TAGS                                             */}
+      {/* TAGS                                              */}
       {/* ================================================= */}
 
       <View style={styles.tagRow}>
@@ -162,7 +174,7 @@ export function DareCard({
       </View>
 
       {/* ================================================= */}
-      {/* META                                             */}
+      {/* META                                              */}
       {/* ================================================= */}
 
       <View style={styles.metaRow}>
@@ -180,47 +192,58 @@ export function DareCard({
       </View>
 
       {/* ================================================= */}
-      {/* SOCIAL ACTIONS                                   */}
+      {/* SOCIAL ACTIONS                                    */}
       {/* ================================================= */}
 
       <View style={styles.actions}>
         {/* LIKE */}
-        <Pressable
-          style={styles.actionButton}
-          onPress={onLike}
-          disabled={!onLike}
-          accessibilityRole="button"
-          accessibilityLabel={
-            likedByMe
-              ? 'Unlike dare'
-              : 'Like dare'
-          }
-        >
-          <Ionicons
-            name={
-              likedByMe
-                ? 'heart'
-                : 'heart-outline'
-            }
-            size={22}
-            color={
-              likedByMe
-                ? '#FF4D67'
-                : colors.primaryText
-            }
-          />
+        {/* LIKE */}
+<View style={styles.likeActionGroup}>
+  <Pressable
+    style={styles.likeIconButton}
+    onPress={onLike}
+    disabled={!onLike}
+    accessibilityRole="button"
+    accessibilityLabel={
+      likedByMe
+        ? 'Unlike dare'
+        : 'Like dare'
+    }
+  >
+    <Ionicons
+      name={
+        likedByMe
+          ? 'heart'
+          : 'heart-outline'
+      }
+      size={22}
+      color={
+        likedByMe
+          ? '#FF4D67'
+          : colors.primaryText
+      }
+    />
+  </Pressable>
 
-          <Text
-            style={[
-              styles.actionText,
-              likedByMe && styles.likedText,
-            ]}
-          >
-            {likeCount > 0
-              ? likeCount
-              : 'Like'}
-          </Text>
-        </Pressable>
+  <Pressable
+    style={styles.likeCountButton}
+    onPress={onLikeCountPress}
+    disabled={!onLikeCountPress || likeCount === 0}
+    accessibilityRole="button"
+    accessibilityLabel="View people who liked this dare"
+  >
+    <Text
+      style={[
+        styles.actionText,
+        likedByMe && styles.likedText,
+      ]}
+    >
+      {likeCount > 0
+        ? likeCount
+        : 'Like'}
+    </Text>
+  </Pressable>
+</View>
 
         {/* COMMENT */}
         <Pressable
@@ -261,10 +284,40 @@ export function DareCard({
             Share
           </Text>
         </Pressable>
+
+        {/* SAVE */}
+        <Pressable
+          style={styles.actionButton}
+          
+          onPress={onSave}
+          disabled={!onSave}
+          accessibilityRole="button"
+          accessibilityLabel={
+            savedByMe
+              ? 'Remove dare from saved'
+              : 'Save dare'
+          }
+        >
+          <Ionicons
+            name={
+              savedByMe
+                ? 'bookmark'
+                : 'bookmark-outline'
+            }
+            size={21}
+            color={colors.primaryText}
+          />
+
+          <Text style={styles.actionText}>
+            {savedByMe
+              ? 'Saved'
+              : 'Save'}
+          </Text>
+        </Pressable>
       </View>
 
       {/* ================================================= */}
-      {/* CTA                                              */}
+      {/* CTA                                               */}
       {/* ================================================= */}
 
       <Pressable
@@ -386,8 +439,8 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.xs,
   },
 
-  /* ===================================================== */
-  /* SOCIAL ACTION STYLES                                 */
+    /* ===================================================== */
+  /* SOCIAL ACTION STYLES                                  */
   /* ===================================================== */
 
   actions: {
@@ -398,6 +451,24 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     marginBottom: spacing.md,
     gap: spacing.lg,
+  },
+
+  likeActionGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  likeIconButton: {
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  likeCountButton: {
+    minHeight: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: spacing.xs,
   },
 
   actionButton: {
@@ -418,7 +489,7 @@ const styles = StyleSheet.create({
   },
 
   /* ===================================================== */
-  /* CTA                                                  */
+  /* CTA                                                   */
   /* ===================================================== */
 
   cta: {
