@@ -1,21 +1,24 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  spacing,
 } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 
@@ -72,6 +75,15 @@ export default function PublicProfileScreen() {
 
   const [followLoading, setFollowLoading] =
     useState(false);
+
+  const [messageLoading, setMessageLoading] =
+    useState(false);
+
+  const [messageModalVisible, setMessageModalVisible] =
+    useState(false);
+
+  const [messageText, setMessageText] =
+    useState('');
 
   const loadProfile = useCallback(async () => {
     if (!userId) {
@@ -288,6 +300,75 @@ export default function PublicProfileScreen() {
     }
   };
 
+  const handleMessageRequest = () => {
+    if (!userId || !currentUserId) {
+      Alert.alert(
+        'Login required',
+        'Please log in to send a message request.',
+      );
+      return;
+    }
+
+    if (currentUserId === userId) {
+      return;
+    }
+
+    if (messageLoading) {
+      return;
+    }
+
+    setMessageText('');
+    setMessageModalVisible(true);
+  };
+
+  const sendMessageRequest = async () => {
+    if (!userId || !currentUserId) {
+      return;
+    }
+
+    if (messageLoading) {
+      return;
+    }
+
+    try {
+      setMessageLoading(true);
+
+      const { error } = await supabase.rpc(
+        'send_message_request',
+        {
+          p_recipient_id: userId,
+          p_message: messageText.trim() || null,
+        },
+      );
+
+      if (error) {
+        throw error;
+      }
+
+      setMessageModalVisible(false);
+      setMessageText('');
+
+      Alert.alert(
+        'Request sent',
+        `Your message request was sent to ${displayName}.`,
+      );
+    } catch (error: any) {
+      console.error(
+        'Message request error:',
+        error,
+      );
+
+      Alert.alert(
+        'Could not send request',
+        error?.message ||
+          'Please try again.',
+      );
+    } finally {
+      setMessageLoading(false);
+    }
+  };
+
+
   if (loading) {
     return (
       <View style={styles.loadingScreen}>
@@ -380,41 +461,74 @@ export default function PublicProfileScreen() {
             </Text>
           ) : null}
 
-          {/* Follow */}
+          {/* Profile Actions */}
           {!isOwnProfile ? (
-            <Pressable
-              onPress={handleFollowToggle}
-              disabled={followLoading}
-              style={[
-                styles.followButton,
-                isFollowing &&
-                  styles.followingButton,
-              ]}
-              accessibilityRole="button"
-            >
-              {followLoading ? (
-                <ActivityIndicator
-                  size="small"
-                  color={
-                    isFollowing
-                      ? colors.primaryText
-                      : colors.background
-                  }
-                />
-              ) : (
-                <Text
-                  style={[
-                    styles.followText,
-                    isFollowing &&
-                      styles.followingText,
-                  ]}
-                >
-                  {isFollowing
-                    ? 'Following'
-                    : 'Follow'}
-                </Text>
-              )}
-            </Pressable>
+            <View style={styles.actionRow}>
+              <Pressable
+                onPress={handleMessageRequest}
+                disabled={messageLoading}
+                style={styles.messageButton}
+                accessibilityRole="button"
+                accessibilityLabel="Send message request"
+              >
+                {messageLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={colors.primaryText}
+                  />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="chatbubble-ellipses-outline"
+                      size={18}
+                      color={colors.primaryText}
+                    />
+                    <Text style={styles.messageText}>
+                      Message
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+
+              <Pressable
+                onPress={handleFollowToggle}
+                disabled={followLoading}
+                style={[
+                  styles.followButton,
+                  isFollowing &&
+                    styles.followingButton,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  isFollowing
+                    ? 'Unfollow user'
+                    : 'Follow user'
+                }
+              >
+                {followLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={
+                      isFollowing
+                        ? colors.primaryText
+                        : colors.background
+                    }
+                  />
+                ) : (
+                  <Text
+                    style={[
+                      styles.followText,
+                      isFollowing &&
+                        styles.followingText,
+                    ]}
+                  >
+                    {isFollowing
+                      ? 'Following'
+                      : 'Follow'}
+                  </Text>
+                )}
+              </Pressable>
+            </View>
           ) : (
             <View style={styles.youBadge}>
               <Text style={styles.youText}>
@@ -521,6 +635,113 @@ export default function PublicProfileScreen() {
           </View>
         )}
       </ScrollView>
+
+      <Modal
+        visible={messageModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!messageLoading) {
+            setMessageModalVisible(false);
+            setMessageText('');
+          }
+        }}
+      >
+        <View style={styles.messageModalBackdrop}>
+          <View style={styles.messageModalCard}>
+            <View style={styles.messageModalHeader}>
+              <View>
+                <Text style={styles.messageModalTitle}>
+                  Message Request
+                </Text>
+                <Text style={styles.messageModalSubtitle}>
+                  Send a request to {displayName}
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={() => {
+                  if (!messageLoading) {
+                    setMessageModalVisible(false);
+                    setMessageText('');
+                  }
+                }}
+                disabled={messageLoading}
+                style={styles.messageModalClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close message request"
+              >
+                <Ionicons
+                  name="close"
+                  size={22}
+                  color={colors.primaryText}
+                />
+              </Pressable>
+            </View>
+
+            <TextInput
+              value={messageText}
+              onChangeText={setMessageText}
+              placeholder="Write a message..."
+              placeholderTextColor={colors.secondaryText}
+              multiline
+              maxLength={500}
+              editable={!messageLoading}
+              style={styles.messageInput}
+              textAlignVertical="top"
+            />
+
+            <Text style={styles.messageCharacterCount}>
+              {messageText.length}/500
+            </Text>
+
+            <View style={styles.messageModalActions}>
+              <Pressable
+                onPress={() => {
+                  if (!messageLoading) {
+                    setMessageModalVisible(false);
+                    setMessageText('');
+                  }
+                }}
+                disabled={messageLoading}
+                style={styles.messageCancelButton}
+              >
+                <Text style={styles.messageCancelText}>
+                  Cancel
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={sendMessageRequest}
+                disabled={messageLoading}
+                style={[
+                  styles.messageSendButton,
+                  messageLoading &&
+                    styles.messageSendButtonDisabled,
+                ]}
+              >
+                {messageLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={colors.background}
+                  />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="send-outline"
+                      size={17}
+                      color={colors.background}
+                    />
+                    <Text style={styles.messageSendText}>
+                      Send
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -644,6 +865,151 @@ const styles = StyleSheet.create({
     fontFamily: fontFamily.body,
     fontSize: fontSize.sm,
     marginTop: 4,
+  },
+
+  messageModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+
+  messageModalCard: {
+    width: '100%',
+    maxWidth: 520,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 20,
+    padding: spacing.lg,
+  },
+
+  messageModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+  },
+
+  messageModalTitle: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.lg,
+  },
+
+  messageModalSubtitle: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.sm,
+    marginTop: 4,
+  },
+
+  messageModalClose: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: -6,
+    marginRight: -6,
+  },
+
+  messageInput: {
+    minHeight: 120,
+    maxHeight: 180,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 14,
+    color: colors.primaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    marginTop: spacing.lg,
+  },
+
+  messageCharacterCount: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: 11,
+    textAlign: 'right',
+    marginTop: 5,
+  },
+
+  messageModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+
+  messageCancelButton: {
+    minWidth: 90,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+
+  messageCancelText: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.sm,
+  },
+
+  messageSendButton: {
+    minWidth: 100,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+
+  messageSendButtonDisabled: {
+    opacity: 0.7,
+  },
+
+  messageSendText: {
+    color: colors.background,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.sm,
+    marginLeft: spacing.xs,
+  },
+
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+
+  messageButton: {
+    minWidth: 140,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+
+  messageText: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.sm,
+    marginLeft: spacing.xs,
   },
 
   followButton: {

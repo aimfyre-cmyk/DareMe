@@ -3,12 +3,12 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -19,6 +19,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { AppHeader } from '../../components/AppHeader';
 import { DareCard, MockDare } from '../../components/DareCard';
 import { EmptyState } from '../../components/EmptyState';
+import { FloatingMessageButton } from '../../components/FloatingMessageButton';
 import { HomeMenu } from '../../components/HomeMenu';
 import { NotificationBell } from '../../components/NotificationBell';
 import { Screen } from '../../components/Screen';
@@ -27,6 +28,7 @@ import { SectionHeader } from '../../components/SectionHeader';
 import { colors, fontSize, spacing } from '../../constants/theme';
 import { transitionDare } from '../../lib/dareTransitions';
 import { supabase } from '../../lib/supabase';
+
 
 type DareRow = {
   id: string;
@@ -80,6 +82,13 @@ type LikeUser = {
   username: string | null;
 };
 
+type SharePerson = {
+  id: string;
+  displayName: string;
+  username: string | null;
+  avatarUrl: string | null;
+};
+
 type DareComment = {
   id: string;
   dareId: string;
@@ -118,6 +127,12 @@ export default function HomeScreen() {
   const [likeUsers, setLikeUsers] = useState<LikeUser[]>([]);
   const [likeUsersDareId, setLikeUsersDareId] = useState<string | null>(null);
   const [likeUsersLoading, setLikeUsersLoading] = useState(false);
+  const [shareDareId, setShareDareId] = useState<string | null>(null);
+  const [sharePeople, setSharePeople] = useState<SharePerson[]>([]);
+  const [shareSelectedIds, setShareSelectedIds] = useState<Set<string>>(new Set());
+  const [shareSearch, setShareSearch] = useState('');
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareSending, setShareSending] = useState(false);
 
   const loadDares = useCallback(async () => {
     try {
@@ -784,12 +799,143 @@ useEffect(() => {
   };
 
   const handleShare = async (dare: MockDare) => {
+    if (!currentUserId) {
+      Alert.alert('Login required', 'Please log in to share a dare.');
+      return;
+    }
+
+    setShareDareId(dare.id);
+    setSharePeople([]);
+    setShareSelectedIds(new Set());
+    setShareSearch('');
+    setShareLoading(true);
+
     try {
-      await Share.share({
-        message: `🔥 DareMe Challenge: ${dare.title}\n\nTake this dare in DareMe!`,
-      });
+      const [followersResult, followingResult] = await Promise.all([
+        supabase
+          .from('follows')
+          .select('follower_id')
+          .eq('following_id', currentUserId),
+        supabase
+          .from('follows')
+          .select('following_id')
+          .eq('follower_id', currentUserId),
+      ]);
+
+      if (followersResult.error) {
+        throw followersResult.error;
+      }
+
+      if (followingResult.error) {
+        throw followingResult.error;
+      }
+
+      const personIds = Array.from(
+        new Set([
+          ...(followersResult.data ?? []).map(
+            (row: { follower_id: string }) => row.follower_id,
+          ),
+          ...(followingResult.data ?? []).map(
+            (row: { following_id: string }) => row.following_id,
+          ),
+        ]),
+      ).filter((id) => id !== currentUserId);
+
+      if (personIds.length === 0) {
+        setSharePeople([]);
+        return;
+      }
+
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id,display_name,username,avatar_url')
+        .in('id', personIds);
+
+      if (profilesError) {
+        throw profilesError;
+      }
+
+      const profileMap = new Map(
+        ((profiles ?? []) as Array<{
+          id: string;
+          display_name: string | null;
+          username: string | null;
+          avatar_url: string | null;
+        }>).map((profile) => [profile.id, profile]),
+      );
+
+      const people = personIds
+        .map((id) => profileMap.get(id))
+        .filter(Boolean)
+        .map((profile) => ({
+          id: profile!.id,
+          displayName:
+            profile!.display_name ||
+            profile!.username ||
+            'DareMe User',
+          username: profile!.username ?? null,
+          avatarUrl: profile!.avatar_url ?? null,
+        }));
+
+      setSharePeople(people);
     } catch (error) {
-      console.error('[Home] Dare share error:', error);
+      console.error('[Home] Load share people error:', error);
+      Alert.alert(
+        'Share unavailable',
+        'Could not load your followers and following right now.',
+      );
+      setShareDareId(null);
+    } finally {
+      setShareLoading(false);
+    }
+  };
+
+  const toggleShareRecipient = (userId: string) => {
+    setShareSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(userId)) {
+        next.delete(userId);
+      } else {
+        next.add(userId);
+      }
+      return next;
+    });
+  };
+
+  const handleSendShare = async () => {
+    if (!shareDareId || !currentUserId || shareSelectedIds.size === 0) {
+      return;
+    }
+
+    try {
+      setShareSending(true);
+
+      const rows = Array.from(shareSelectedIds).map((recipientId) => ({
+        dare_id: shareDareId,
+        sender_id: currentUserId,
+        recipient_id: recipientId,
+      }));
+
+      const { error } = await supabase
+        .from('dare_shares')
+        .upsert(rows, {
+          onConflict: 'dare_id,recipient_id',
+          ignoreDuplicates: true,
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      setShareDareId(null);
+      setShareSelectedIds(new Set());
+      setShareSearch('');
+      Alert.alert('Shared successfully', 'The dare was sent successfully.');
+    } catch (error) {
+      console.error('[Home] Dare share send error:', error);
+      Alert.alert('Share failed', 'Could not share this dare. Please try again.');
+    } finally {
+      setShareSending(false);
     }
   };
 
@@ -1030,6 +1176,7 @@ onSave={() => handleSaveDare(dare.id)}
         />
       )}
     </Screen>
+          <FloatingMessageButton />
 
     <Modal
       visible={commentDareId !== null}
@@ -1101,9 +1248,7 @@ onSave={() => handleSaveDare(dare.id)}
                   <DareCommentItem
                     key={comment.id}
                     comment={comment}
-                    replies={comments.filter(
-                      (reply) => reply.parentCommentId === comment.id,
-                    )}
+                    allComments={comments}
                     onLike={handleCommentLike}
                     onReply={handleReply}
                   />
@@ -1167,6 +1312,220 @@ onSave={() => handleSaveDare(dare.id)}
                   : replyToComment
                     ? 'Post Reply'
                     : 'Post Comment'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+
+    <Modal
+      visible={shareDareId !== null}
+      transparent
+      animationType="slide"
+      onRequestClose={() => {
+        if (!shareSending) {
+          setShareDareId(null);
+          setShareSelectedIds(new Set());
+          setShareSearch('');
+        }
+      }}
+    >
+      <KeyboardAvoidingView
+        style={styles.modalBackdrop}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Pressable
+          style={styles.modalBackdropPressable}
+          onPress={() => {
+            if (!shareSending) {
+              setShareDareId(null);
+              setShareSelectedIds(new Set());
+              setShareSearch('');
+            }
+          }}
+        />
+
+        <View style={styles.shareSheet}>
+          <View style={styles.commentHandle} />
+
+          <View style={styles.commentHeaderRow}>
+            <View>
+              <Text style={styles.commentTitle}>Share Dare</Text>
+              <Text style={styles.shareSubtitle}>
+                Send this dare to people you follow or who follow you.
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={() => {
+                if (!shareSending) {
+                  setShareDareId(null);
+                  setShareSelectedIds(new Set());
+                  setShareSearch('');
+                }
+              }}
+              hitSlop={10}
+              disabled={shareSending}
+            >
+              <Ionicons
+                name="close"
+                size={24}
+                color={colors.primaryText}
+              />
+            </Pressable>
+          </View>
+
+          <View style={styles.shareSearchBox}>
+            <Ionicons
+              name="search-outline"
+              size={19}
+              color={colors.secondaryText}
+            />
+            <TextInput
+              value={shareSearch}
+              onChangeText={setShareSearch}
+              placeholder="Search people..."
+              placeholderTextColor={colors.secondaryText}
+              style={styles.shareSearchInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+
+          {shareLoading ? (
+            <View style={styles.commentsState}>
+              <ActivityIndicator size="small" color={colors.accent} />
+              <Text style={styles.commentsStateText}>
+                Loading people...
+              </Text>
+            </View>
+          ) : (
+            <ScrollView
+              style={styles.sharePeopleList}
+              contentContainerStyle={styles.sharePeopleListContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              {sharePeople.filter((person) => {
+                const query = shareSearch.trim().toLowerCase();
+                if (!query) {
+                  return true;
+                }
+
+                return (
+                  person.displayName.toLowerCase().includes(query) ||
+                  (person.username ?? '').toLowerCase().includes(query)
+                );
+              }).length === 0 ? (
+                <View style={styles.commentsState}>
+                  <Ionicons
+                    name="people-outline"
+                    size={30}
+                    color={colors.secondaryText}
+                  />
+                  <Text style={styles.commentsStateText}>
+                    No people to share with yet
+                  </Text>
+                </View>
+              ) : (
+                sharePeople
+                  .filter((person) => {
+                    const query = shareSearch.trim().toLowerCase();
+                    if (!query) {
+                      return true;
+                    }
+
+                    return (
+                      person.displayName.toLowerCase().includes(query) ||
+                      (person.username ?? '').toLowerCase().includes(query)
+                    );
+                  })
+                  .map((person) => {
+                    const selected = shareSelectedIds.has(person.id);
+
+                    return (
+                      <Pressable
+                        key={person.id}
+                        onPress={() => toggleShareRecipient(person.id)}
+                        style={[
+                          styles.sharePersonRow,
+                          selected && styles.sharePersonRowSelected,
+                        ]}
+                        disabled={shareSending}
+                      >
+                        <View style={styles.sharePersonAvatar}>
+                          {person.avatarUrl ? (
+                            <Image
+                              source={{ uri: person.avatarUrl }}
+                              style={styles.sharePersonAvatarImage}
+                              resizeMode="cover"
+                            />
+                          ) : (
+                            <Text style={styles.sharePersonAvatarText}>
+                              {person.displayName.charAt(0).toUpperCase()}
+                            </Text>
+                          )}
+                        </View>
+
+                        <View style={styles.sharePersonInfo}>
+                          <Text style={styles.sharePersonName}>
+                            {person.displayName}
+                          </Text>
+                          {person.username ? (
+                            <Text style={styles.sharePersonUsername}>
+                              @{person.username}
+                            </Text>
+                          ) : null}
+                        </View>
+
+                        <View
+                          style={[
+                            styles.shareSelectButton,
+                            selected && styles.shareSelectButtonSelected,
+                          ]}
+                        >
+                          <Ionicons
+                            name={selected ? 'checkmark' : 'paper-plane-outline'}
+                            size={18}
+                            color={
+                              selected
+                                ? colors.background
+                                : colors.primaryText
+                            }
+                          />
+                          <Text
+                            style={[
+                              styles.shareSelectText,
+                              selected && styles.shareSelectTextSelected,
+                            ]}
+                          >
+                            {selected ? 'Selected' : 'Send'}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })
+              )}
+            </ScrollView>
+          )}
+
+          <View style={styles.shareFooter}>
+            <Text style={styles.shareSelectedCount}>
+              {shareSelectedIds.size} selected
+            </Text>
+
+            <Pressable
+              onPress={handleSendShare}
+              disabled={shareSending || shareSelectedIds.size === 0}
+              style={[
+                styles.shareSendButton,
+                (shareSending || shareSelectedIds.size === 0) &&
+                  styles.shareSendButtonDisabled,
+              ]}
+            >
+              <Text style={styles.shareSendButtonText}>
+                {shareSending ? 'Sharing...' : 'Share'}
               </Text>
             </Pressable>
           </View>
@@ -1251,20 +1610,41 @@ onSave={() => handleSaveDare(dare.id)}
 
 function DareCommentItem({
   comment,
-  replies,
+  allComments,
   onLike,
   onReply,
+  depth = 0,
 }: {
   comment: DareComment;
-  replies: DareComment[];
+  allComments: DareComment[];
   onLike: (commentId: string) => void | Promise<void>;
   onReply: (comment: DareComment) => void;
+  depth?: number;
 }) {
+  const replies = allComments.filter(
+    (item) => item.parentCommentId === comment.id,
+  );
+
   return (
-    <View style={styles.commentBlock}>
+    <View
+      style={[
+        styles.commentBlock,
+        depth > 0 && styles.nestedCommentBlock,
+      ]}
+    >
       <View style={styles.commentRow}>
-        <View style={styles.commentAvatar}>
-          <Text style={styles.commentAvatarText}>
+        <View
+          style={[
+            styles.commentAvatar,
+            depth > 0 && styles.replyAvatar,
+          ]}
+        >
+          <Text
+            style={[
+              styles.commentAvatarText,
+              depth > 0 && styles.replyAvatarText,
+            ]}
+          >
             {comment.displayName.charAt(0).toUpperCase()}
           </Text>
         </View>
@@ -1273,11 +1653,13 @@ function DareCommentItem({
           <Text style={styles.commentUserName}>
             {comment.displayName}
           </Text>
+
           {comment.username ? (
             <Text style={styles.commentUsername}>
               @{comment.username}
             </Text>
           ) : null}
+
           <Text style={styles.commentContent}>
             {comment.content}
           </Text>
@@ -1291,8 +1673,13 @@ function DareCommentItem({
               <Ionicons
                 name={comment.likedByMe ? 'heart' : 'heart-outline'}
                 size={17}
-                color={comment.likedByMe ? '#FF4D67' : colors.secondaryText}
+                color={
+                  comment.likedByMe
+                    ? '#FF4D67'
+                    : colors.secondaryText
+                }
               />
+
               {comment.likeCount > 0 ? (
                 <Text
                   style={[
@@ -1315,58 +1702,31 @@ function DareCommentItem({
                 size={17}
                 color={colors.secondaryText}
               />
-              <Text style={styles.commentMetaText}>Reply</Text>
+
+              <Text style={styles.commentMetaText}>
+                Reply
+              </Text>
             </Pressable>
           </View>
         </View>
       </View>
 
       {replies.length > 0 ? (
-        <View style={styles.repliesContainer}>
+        <View
+          style={[
+            styles.repliesContainer,
+            depth > 0 && styles.nestedRepliesContainer,
+          ]}
+        >
           {replies.map((reply) => (
-            <View key={reply.id} style={styles.replyRow}>
-              <View style={styles.replyAvatar}>
-                <Text style={styles.replyAvatarText}>
-                  {reply.displayName.charAt(0).toUpperCase()}
-                </Text>
-              </View>
-              <View style={styles.commentBody}>
-                <Text style={styles.commentUserName}>
-                  {reply.displayName}
-                </Text>
-                {reply.username ? (
-                  <Text style={styles.commentUsername}>
-                    @{reply.username}
-                  </Text>
-                ) : null}
-                <Text style={styles.commentContent}>
-                  {reply.content}
-                </Text>
-                <View style={styles.commentMetaRow}>
-                  <Pressable
-                    onPress={() => onLike(reply.id)}
-                    style={styles.commentMetaButton}
-                    hitSlop={6}
-                  >
-                    <Ionicons
-                      name={reply.likedByMe ? 'heart' : 'heart-outline'}
-                      size={17}
-                      color={reply.likedByMe ? '#FF4D67' : colors.secondaryText}
-                    />
-                    {reply.likeCount > 0 ? (
-                      <Text
-                        style={[
-                          styles.commentMetaText,
-                          reply.likedByMe && styles.commentLikedText,
-                        ]}
-                      >
-                        {reply.likeCount}
-                      </Text>
-                    ) : null}
-                  </Pressable>
-                </View>
-              </View>
-            </View>
+            <DareCommentItem
+              key={reply.id}
+              comment={reply}
+              allComments={allComments}
+              onLike={onLike}
+              onReply={onReply}
+              depth={depth + 1}
+            />
           ))}
         </View>
       ) : null}
@@ -1649,6 +2009,169 @@ menuLine: {
   replyAvatarText: {
     color: colors.primaryText,
     fontSize: 12,
+    fontWeight: '700',
+  },
+
+  nestedCommentBlock: {
+    paddingVertical: spacing.xs,
+  },
+
+  nestedRepliesContainer: {
+    marginLeft: 36,
+    paddingLeft: spacing.sm,
+  },
+
+  shareSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
+    maxHeight: '82%',
+  },
+
+  shareSubtitle: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.sm,
+    maxWidth: 280,
+  },
+
+  shareSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: spacing.sm,
+    backgroundColor: colors.surfaceElevated,
+    marginBottom: spacing.sm,
+  },
+
+  shareSearchInput: {
+    flex: 1,
+    color: colors.primaryText,
+    fontSize: fontSize.sm,
+    marginLeft: spacing.xs,
+  },
+
+  sharePeopleList: {
+    maxHeight: 390,
+  },
+
+  sharePeopleListContent: {
+    paddingBottom: spacing.sm,
+  },
+
+  sharePersonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    borderRadius: 12,
+  },
+
+  sharePersonRowSelected: {
+    backgroundColor: colors.surfaceElevated,
+  },
+
+  sharePersonAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+
+  sharePersonAvatarText: {
+    color: colors.primaryText,
+    fontWeight: '700',
+  },
+
+  sharePersonAvatarImage: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+  },
+
+  sharePersonInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  sharePersonName: {
+    color: colors.primaryText,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+
+  sharePersonUsername: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  shareSelectButton: {
+    minHeight: 36,
+    paddingHorizontal: spacing.sm,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+
+  shareSelectButtonSelected: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+
+  shareSelectText: {
+    color: colors.primaryText,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  shareSelectTextSelected: {
+    color: colors.background,
+  },
+
+  shareFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+  },
+
+  shareSelectedCount: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  shareSendButton: {
+    minHeight: 44,
+    paddingHorizontal: spacing.xl,
+    borderRadius: 22,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  shareSendButtonDisabled: {
+    opacity: 0.45,
+  },
+
+  shareSendButtonText: {
+    color: colors.background,
+    fontSize: fontSize.sm,
     fontWeight: '700',
   },
 
