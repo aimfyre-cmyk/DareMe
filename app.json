@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "DareMe",
-    "slug": "DareMe",
+  "name": "DareShot",
+  "slug": "DareShot",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "dareme",
+    "scheme": "dareshot",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"

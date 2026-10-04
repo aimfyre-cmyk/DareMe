@@ -176,7 +176,7 @@ export default function LoginScreen() {
       }
     >
       <View style={styles.content}>
-        <Text style={styles.logo}>DAREME</Text>
+        <Text style={styles.logo}>DARESHOT</Text>
 
         <Text style={styles.title}>
           Welcome back.
@@ -431,7 +431,7 @@ export default function LoginScreen() {
             disabled={loading}
           >
             <Text style={styles.linkText}>
-              New to DareMe?{' '}
+              New to DareShot?{' '}
               <Text style={styles.linkAccent}>
                 Create account
               </Text>

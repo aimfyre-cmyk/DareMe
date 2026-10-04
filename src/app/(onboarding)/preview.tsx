@@ -214,7 +214,7 @@ export default function PreviewScreen() {
           <Text style={styles.title}>You're all set.</Text>
 
           <Text style={styles.subtitle}>
-            Take a quick look at your profile before entering DareMe.
+            Take a quick look at your profile before entering DareShot.
           </Text>
         </View>
 

@@ -1,20 +1,20 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-    ActivityIndicator,
-    Pressable,
-    Share,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { AppHeader } from '../components/AppHeader';
 import { Screen } from '../components/Screen';
 import {
-    colors,
-    fontSize,
-    spacing,
+  colors,
+  fontSize,
+  spacing,
 } from '../constants/theme';
 
 export default function InviteFriendsScreen() {
@@ -27,9 +27,9 @@ export default function InviteFriendsScreen() {
       setSharing(true);
 
       await Share.share({
-        title: 'Join me on DareMe',
+        title: 'Join me on DareShot',
         message:
-          "I'm on DareMe 🔥 — a social app built around challenges, dares and real experiences. Join me and take the dare!",
+          "I'm on DareShot 🔥 — a social app built around challenges, dares and real experiences. Join me and take the dare!",
       });
     } catch (error) {
       console.error(
@@ -66,7 +66,7 @@ export default function InviteFriendsScreen() {
         </View>
 
         <Text style={styles.title}>
-          Bring your friends to DareMe
+          Bring your friends to DareShot
         </Text>
 
         <Text style={styles.description}>
@@ -99,7 +99,7 @@ export default function InviteFriendsScreen() {
               </Text>
 
               <Text style={styles.featureDescription}>
-                Complete dares and climb the DareMe
+                Complete dares and climb the DareShot
                 rankings.
               </Text>
             </View>

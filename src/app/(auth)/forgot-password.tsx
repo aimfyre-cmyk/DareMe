@@ -1,14 +1,14 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
@@ -64,7 +64,7 @@ export default function ForgotPasswordScreen() {
           <Text style={styles.backText}>← Back to login</Text>
         </Pressable>
 
-        <Text style={styles.logo}>DAREME</Text>
+        <Text style={styles.logo}>DARESHOT</Text>
 
         <Text style={styles.title}>Reset password.</Text>
 

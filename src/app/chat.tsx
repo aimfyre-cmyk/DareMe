@@ -712,7 +712,7 @@ if (loadedMessages.length > 0) {
     return (
       profile?.display_name ||
       profile?.username ||
-      'DareMe User'
+      'DareShot User'
     );
   }, [profile]);
 

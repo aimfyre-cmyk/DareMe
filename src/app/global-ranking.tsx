@@ -1,20 +1,20 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Image,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { AppHeader } from '../components/AppHeader';
 import { Screen } from '../components/Screen';
 import {
-    colors,
-    fontSize,
-    spacing,
+  colors,
+  fontSize,
+  spacing,
 } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 
@@ -129,7 +129,7 @@ export default function GlobalRankingScreen() {
 
       <View style={styles.intro}>
         <Text style={styles.title}>
-          Worldwide DareMe Ranking
+          Worldwide DareShot Ranking
         </Text>
 
         <Text style={styles.subtitle}>
@@ -213,7 +213,7 @@ export default function GlobalRankingScreen() {
             const displayName =
               item.display_name ||
               item.username ||
-              'DareMe User';
+              'DareShot User';
 
             const username = item.username
               ? `@${item.username}`

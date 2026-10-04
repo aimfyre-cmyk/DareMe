@@ -1,10 +1,10 @@
 import {
-    Modal,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { colors, fontSize, spacing } from '../constants/theme';
@@ -43,9 +43,9 @@ export function HomeMenu({
         <View style={styles.menu}>
           <View style={styles.header}>
             <View>
-              <Text style={styles.title}>DareMe</Text>
+              <Text style={styles.title}>DareShot</Text>
               <Text style={styles.subtitle}>
-                Your DareMe menu
+                Your DareShot menu
               </Text>
             </View>
 

@@ -1,24 +1,24 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { Input } from '../../components/Input';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    radius,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
 } from '../../constants/theme';
 import { isUsernameAvailable } from '../../features/onboarding/profileService';
 import { getCurrentSession } from '../../lib/auth';
@@ -126,7 +126,7 @@ export default function IdentityScreen() {
           <Text style={styles.title}>Let's get you started.</Text>
 
           <Text style={styles.subtitle}>
-            Tell us what people should call you on DareMe.
+            Tell us what people should call you on DareShot.
           </Text>
         </View>
 

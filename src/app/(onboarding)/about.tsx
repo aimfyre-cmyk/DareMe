@@ -321,7 +321,7 @@ export default function AboutScreen() {
       age < 13
     ) {
       setError(
-        'You must be at least 13 years old to use DareMe.',
+        'You must be at least 13 years old to use DareShot.',
       );
       return;
     }
@@ -384,7 +384,7 @@ export default function AboutScreen() {
           </Text>
 
           <Text style={styles.subtitle}>
-            This helps DareMe understand your
+            This helps DareShot understand your
             profile and keep future dare
             experiences age-appropriate.
           </Text>

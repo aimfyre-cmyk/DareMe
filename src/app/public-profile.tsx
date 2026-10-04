@@ -423,7 +423,7 @@ if (signedError) {
   const displayName =
     profile.display_name ||
     profile.username ||
-    'DareMe User';
+    'DareShot User';
 
   const username = profile.username
     ? `@${profile.username}`

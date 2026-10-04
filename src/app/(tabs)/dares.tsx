@@ -1010,7 +1010,7 @@ export default function DaresScreen() {
                   styles.proofHint
                 }
               >
-                Create a DareMe Post showing your Dare completion.
+                Create a DareShot. Post showing your Dare completion.
               </Text>
 
               <Pressable

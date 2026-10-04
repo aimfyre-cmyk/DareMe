@@ -1,21 +1,21 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { Screen } from '../../components/Screen';
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    radius,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
 } from '../../constants/theme';
 import { supabase } from '../../lib/supabase';
 
@@ -39,7 +39,7 @@ const OPTIONS: {
   {
     value: 'anyone',
     label: 'Anyone',
-    description: 'Anyone on DareMe can see this.',
+    description: 'Anyone on DARESHOT can see this.',
   },
   {
     value: 'followers',
@@ -268,7 +268,7 @@ export default function PrivacyScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>DAREME</Text>
+          <Text style={styles.eyebrow}>DARESHOT</Text>
 
           <Text style={styles.title}>Privacy</Text>
 

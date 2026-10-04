@@ -50,7 +50,7 @@ type InboxConversation = {
 };
 
 function displayName(profile: Profile | null) {
-  return profile?.display_name?.trim() || profile?.username || 'DareMe user';
+  return profile?.display_name?.trim() || profile?.username || 'DareShot user';
 }
 
 function formatTime(value: string | null) {

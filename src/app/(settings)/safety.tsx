@@ -1,22 +1,22 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-    Alert,
-    Pressable,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { Screen } from '../../components/Screen';
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    radius,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
 } from '../../constants/theme';
 import { supabase } from '../../lib/supabase';
 
@@ -243,7 +243,7 @@ export default function SafetyScreen() {
         contentContainerStyle={styles.content}
       >
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>DAREME</Text>
+          <Text style={styles.eyebrow}>DARESHOT</Text>
 
           <Text style={styles.title}>Safety</Text>
 
@@ -405,7 +405,7 @@ export default function SafetyScreen() {
 
         <View style={styles.infoBox}>
           <Text style={styles.infoTitle}>
-            Stay safe on DareMe
+            Stay safe on DARESHOT
           </Text>
 
           <Text style={styles.infoText}>

@@ -1,12 +1,12 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Image,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { AppHeader } from '../components/AppHeader';
@@ -386,7 +386,7 @@ export default function DareCircleScreen() {
             const displayName =
               item.display_name ||
               item.username ||
-              'DareMe User';
+              'DareShot User';
 
             const username = item.username
               ? `@${item.username}`

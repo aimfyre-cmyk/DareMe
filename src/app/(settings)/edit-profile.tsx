@@ -2,29 +2,29 @@ import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { Screen } from '../../components/Screen';
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    radius,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
 } from '../../constants/theme';
 import {
-    getProfile,
-    saveProfile,
-    uploadAvatar,
+  getProfile,
+  saveProfile,
+  uploadAvatar,
 } from '../../features/onboarding/profileService';
 import { getCurrentSession } from '../../lib/auth';
 
@@ -305,7 +305,7 @@ export default function EditProfileScreen() {
 
           <Text style={styles.subtitle}>
             Update the information people see on your
-            DareMe profile.
+            DareShot profile.
           </Text>
         </View>
 

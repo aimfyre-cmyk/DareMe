@@ -193,7 +193,7 @@ export default function CreateScreen() {
       </Text>
 
       <Text style={styles.subheading}>
-        Create a challenge and publish it to DareMe.
+        Create a challenge and publish it to  DareShot.
       </Text>
 
       <SectionHeader title="What's the dare?" />

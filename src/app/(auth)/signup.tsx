@@ -201,14 +201,14 @@ export default function SignupScreen() {
       }
     >
       <View style={styles.content}>
-        <Text style={styles.logo}>DAREME</Text>
+        <Text style={styles.logo}>DARESHOT</Text>
 
         <Text style={styles.title}>
           Create account.
         </Text>
 
         <Text style={styles.subtitle}>
-          Join DareMe, take dares and make memories.
+          Join DareShot, take dares and make memories.
         </Text>
 
         {/* Auth method switcher */}

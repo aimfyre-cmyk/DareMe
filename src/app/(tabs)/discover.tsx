@@ -891,7 +891,7 @@ useEffect(() => {
       ) : (
         <EmptyState
           title="No posts yet"
-          description="Be the first to share something with the DareMe community."
+          description="Be the first to share something with the DareShot community."
         />
       )}
 
@@ -1012,7 +1012,7 @@ screenFocused,
   const displayName =
     post.profile?.display_name ||
     post.profile?.username ||
-    'DareMe User';
+    'DareShot User';
 
   const username =
     post.profile?.username
@@ -1473,7 +1473,7 @@ function CommentModal({
                 const name =
                   comment.profile?.display_name ||
                   comment.profile?.username ||
-                  'DareMe User';
+                  'DareShot User';
 
                 const username =
                   comment.profile?.username

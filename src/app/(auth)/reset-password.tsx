@@ -1,14 +1,14 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-    ActivityIndicator,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
@@ -97,12 +97,12 @@ export default function ResetPasswordScreen() {
           <Text style={styles.backText}>← Back to login</Text>
         </Pressable>
 
-        <Text style={styles.logo}>DAREME</Text>
+        <Text style={styles.logo}>DARESHOT</Text>
 
         <Text style={styles.title}>New password.</Text>
 
         <Text style={styles.subtitle}>
-          Apna naya password set karo aur apne DareMe account mein
+          Apna naya password set karo aur apne DareShot account mein
           wapas jao.
         </Text>
 

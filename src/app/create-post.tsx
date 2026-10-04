@@ -528,7 +528,7 @@ const uploadedStoragePath =
        * type
        * storage_path
        *
-       * The proof points to the DareMe Post.
+       * The proof points to the DareShot Post.
        */
 
       if (
@@ -762,7 +762,7 @@ const uploadedStoragePath =
           ? normalizedDareProofType === 'video'
             ? 'Create a Video showing your Dare completion.'
             : 'Create a Post showing your Dare completion.'
-          : 'Share something with the DareMe community.'}
+          : 'Share something with the DareShot community.'}
       </Text>
 
       {/* =================================================

@@ -1,19 +1,19 @@
 import { router } from 'expo-router';
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { Screen } from '../../components/Screen';
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    radius,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
 } from '../../constants/theme';
 
 type AccountRowProps = {
@@ -79,7 +79,7 @@ export default function AccountSettingsScreen() {
           </Text>
 
           <Text style={styles.subtitle}>
-            Manage your DareMe account information.
+            Manage your DareShot account information.
           </Text>
         </View>
 

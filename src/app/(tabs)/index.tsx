@@ -605,7 +605,7 @@ useEffect(() => {
             displayName:
               profile?.display_name ||
               profile?.username ||
-              'DareMe User',
+              'DareShot User',
             username: profile?.username ?? null,
             likeCount: commentLikes.length,
             likedByMe:
@@ -689,7 +689,7 @@ useEffect(() => {
             displayName:
               profile?.display_name ||
               profile?.username ||
-              'DareMe User',
+              'DareShot User',
             username: profile?.username ?? null,
           };
         }),
@@ -872,7 +872,7 @@ useEffect(() => {
           displayName:
             profile!.display_name ||
             profile!.username ||
-            'DareMe User',
+            'DareShot User',
           username: profile!.username ?? null,
           avatarUrl: profile!.avatar_url ?? null,
         }));
@@ -987,7 +987,7 @@ useEffect(() => {
     <>
     <Screen>
       <AppHeader
-  title="DareMe"
+  title="DareShot"
   leftSlot={
     <Pressable
       onPress={() => setMenuVisible(true)}
@@ -1040,7 +1040,7 @@ useEffect(() => {
     },
     {
   title: 'My Activity',
-  subtitle: 'Your DareMe activity',
+  subtitle: 'Your DareShot activity',
   icon: '',
   onPress: () => router.push('/my-activity'),
 },
@@ -1052,13 +1052,13 @@ useEffect(() => {
 },
     {
   title: 'Invite Friends',
-  subtitle: 'Invite people to DareMe',
+  subtitle: 'Invite people to DareShot',
   icon: '',
   onPress: () => router.push('/invite-friends'),
 },
     {
       title: 'Leaderboard',
-      subtitle: 'Compete in DareMe',
+      subtitle: 'Compete in DareShot',
       icon: '🏆',
       onPress: () => router.push('/leaderboard'),
     },

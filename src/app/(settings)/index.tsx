@@ -1,19 +1,19 @@
 import { router } from 'expo-router';
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { Screen } from '../../components/Screen';
 import {
-    colors,
-    fontFamily,
-    fontSize,
-    radius,
-    spacing,
+  colors,
+  fontFamily,
+  fontSize,
+  radius,
+  spacing,
 } from '../../constants/theme';
 
 type SettingsRowProps = {
@@ -55,7 +55,7 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>DAREME</Text>
+          <Text style={styles.eyebrow}>DARESHOT</Text>
 
           <Text style={styles.title}>Settings</Text>
 
@@ -105,7 +105,7 @@ export default function SettingsScreen() {
         <View style={styles.card}>
           <SettingsRow
             title="Notifications"
-            description="Manage your DareMe notifications"
+            description="Manage your DareShot notifications"
             onPress={() => {}}
           />
 
@@ -113,14 +113,14 @@ export default function SettingsScreen() {
 
           <SettingsRow
             title="Help & Support"
-            description="Get help with DareMe"
+            description="Get help with DareShot"
             onPress={() => {}}
           />
 
           <View style={styles.divider} />
 
           <SettingsRow
-            title="About DareMe"
+            title="About DareShot"
             description="App information and legal documents"
             onPress={() => {}}
           />

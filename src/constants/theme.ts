@@ -1,5 +1,5 @@
 /**
- * DareMe — centralized design tokens.
+ * DareShot  — centralized design tokens.
  * Locked palette per Phase 0 spec. Do not scatter raw colors in components —
  * always import from here.
  */
@@ -11,6 +11,7 @@ export const colors = {
   primaryText: '#FFFFFF',
   secondaryText: '#A7A7AD',
   accent: 'hsl(0, 23%, 98%)',
+  brandYellow: '#D4A72C',
   danger: '#FF4D5A',
   success: '#35D07F',
   border: '#29292E',

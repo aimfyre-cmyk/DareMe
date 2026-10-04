@@ -16,7 +16,7 @@ type AppHeaderProps = {
  * Top-of-screen brand/context header.
  *
  * The title is visually centered independently of the left/right content,
- * so the DareMe wordmark stays centered even when the action groups have
+ * so the DareShot wordmark stays centered even when the action groups have
  * different widths.
  *
  * Existing avatar/rightSlot behavior is preserved for other screens.

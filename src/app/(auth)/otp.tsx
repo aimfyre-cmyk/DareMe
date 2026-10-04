@@ -181,7 +181,7 @@ export default function OtpScreen() {
       }
     >
       <View style={styles.content}>
-        <Text style={styles.logo}>DAREME</Text>
+        <Text style={styles.logo}>DARESHOT</Text>
 
         <Text style={styles.title}>
           {isPhoneChange

@@ -1,12 +1,12 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    Image,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 
@@ -84,7 +84,7 @@ export default function LeaderboardScreen() {
       />
 
       <Text style={styles.subtitle}>
-        Compete with DareMe players and climb the rankings.
+        Compete with DareShot players and climb the rankings.
       </Text>
 
       <View style={styles.periodTabs}>

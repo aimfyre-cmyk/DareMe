@@ -4,7 +4,7 @@ import { colors } from '../../constants/theme';
 
 /**
  * The five primary destinations: Home, Discover, Create, Dares, Me.
- * expo-router's Tabs acts as our BottomNav — styled to the DareMe theme,
+ * expo-router's Tabs acts as our BottomNav — styled to the  DareShot theme,
  * with Create visually emphasized per the design system.
  */
 export default function TabsLayout() {

@@ -1,12 +1,12 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Image,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { Avatar } from '../components/Avatar';
@@ -92,7 +92,7 @@ export default function FollowListScreen() {
           .filter((profile): profile is Profile => Boolean(profile)),
       );
     } catch (error) {
-      console.error('[DareMe Follow List] Failed to load:', error);
+      console.error('[DareShot user Follow List] Failed to load:', error);
       setErrorMessage(
         error instanceof Error
           ? error.message
@@ -172,7 +172,7 @@ export default function FollowListScreen() {
 
               <View style={styles.profileText}>
                 <Text style={styles.displayName} numberOfLines={1}>
-                  {profile.display_name || 'DareMe user'}
+                  {profile.display_name || 'DareShot user'}
                 </Text>
                 <Text style={styles.username} numberOfLines={1}>
                   @{profile.username}

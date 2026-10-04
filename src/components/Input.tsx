@@ -1,4 +1,3 @@
-import React from 'react';
 import { StyleSheet, Text, TextInput, TextInputProps, View } from 'react-native';
 import { colors, fontFamily, fontSize, radius, spacing } from '../constants/theme';
 
@@ -7,7 +6,7 @@ type InputProps = TextInputProps & {
 };
 
 /**
- * Text input primitive. Applies the DareMe surface/border treatment and
+ * Text input primitive. Applies the DareShot surface/border treatment and
  * a readable placeholder color; forwards all standard TextInput props.
  */
 export function Input({ label, style, ...rest }: InputProps) {

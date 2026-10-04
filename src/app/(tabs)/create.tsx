@@ -20,7 +20,7 @@ export default function CreateScreen() {
     <Screen>
       <Text style={styles.heading}>Create</Text>
       <Text style={styles.subheading}>
-        Share a dare, post, or reel with the DareMe community.
+        Share a dare, post, or reel with the DareShot community.
       </Text>
 
       <View style={styles.options}>

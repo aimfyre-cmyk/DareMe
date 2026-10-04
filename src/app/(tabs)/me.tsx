@@ -444,7 +444,7 @@ setProfile((current) =>
         <View style={styles.emptyPosts}>
           <Text style={styles.emptyTitle}>No posts yet</Text>
           <Text style={styles.emptyDescription}>
-            Share your first post with the DareMe community.
+            Share your first post with the DareShot  community.
           </Text>
 
           <Pressable

@@ -147,7 +147,7 @@ export default function InterestsScreen() {
           <Text style={styles.title}>What are you into?</Text>
 
           <Text style={styles.subtitle}>
-            Pick the things you enjoy. We'll use these to shape your DareMe
+            Pick the things you enjoy. We'll use these to shape your DareShot
             experience.
           </Text>
         </View>

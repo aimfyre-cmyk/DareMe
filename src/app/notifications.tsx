@@ -134,8 +134,7 @@ export default function NotificationsScreen() {
         .update({ is_read: true })
         .eq('id', notification.id);
 
-      if (error) console.warn('[DareMe Notifications] Mark read error:', error);
-    }
+if (error) console.warn('[DareShot Notifications] Mark read error:', error);    }
 
     const actorId = actorIdOf(notification);
     if (actorId) {

@@ -2,14 +2,14 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 
 import { Screen } from '../components/Screen';
@@ -122,7 +122,7 @@ export default function MessageRequestsScreen() {
           display_name:
             profile?.display_name ||
             profile?.username ||
-            'DareMe User',
+            'DareShot User',
           username: profile?.username ?? null,
           avatar_url: profile?.avatar_url ?? null,
         };
