@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { getR2MediaUrl } from '../../features/onboarding/profileService';
 
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { AppHeader } from '../../components/AppHeader';
@@ -80,6 +81,7 @@ type LikeUser = {
   id: string;
   displayName: string;
   username: string | null;
+  avatarUrl: string | null;
 };
 
 type SharePerson = {
@@ -98,6 +100,7 @@ type DareComment = {
   createdAt: string;
   displayName: string;
   username: string | null;
+  avatarUrl: string | null;
   likeCount: number;
   likedByMe: boolean;
 };
@@ -559,7 +562,8 @@ useEffect(() => {
           userIds.length > 0
             ? await supabase
                 .from('profiles')
-                .select('id,username,display_name')
+                  .select('id,username,display_name,avatar_url')
+
                 .in('id', userIds)
             : { data: [], error: null };
 
@@ -579,20 +583,27 @@ useEffect(() => {
           throw likesResult.error;
         }
 
-        const profileMap = new Map<string, { username: string | null; display_name: string | null }>();
-        for (const profile of (profilesResult.data ?? []) as Array<{
-          id: string;
+        const profileMap = new Map<string, {
           username: string | null;
           display_name: string | null;
-        }>) {
+          avatar_url: string | null;
+        }>();
+        for (const profile of (profilesResult.data ?? []) as Array<{
+  id: string;
+  username: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+}>) {
           profileMap.set(profile.id, profile);
         }
 
         const likeRows = likesResult.data ?? [];
-        const mappedComments: DareComment[] = rows.map((row) => {
+        const mappedComments: DareComment[] = await Promise.all(
+  rows.map(async (row) => {
           const profile = profileMap.get(row.user_id);
           const commentLikes = likeRows.filter(
             (like) => like.comment_id === row.id,
+            
           );
 
           return {
@@ -607,6 +618,9 @@ useEffect(() => {
               profile?.username ||
               'DareShot User',
             username: profile?.username ?? null,
+            avatarUrl: profile?.avatar_url
+  ? await getR2MediaUrl(profile.avatar_url)
+  : null,
             likeCount: commentLikes.length,
             likedByMe:
               currentUserId !== null &&
@@ -614,7 +628,8 @@ useEffect(() => {
                 (like) => like.user_id === currentUserId,
               ),
           };
-        });
+        }),
+        );
 
         setComments(mappedComments);
         setCommentCounts((current) => ({
@@ -660,7 +675,7 @@ useEffect(() => {
 
       const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
-        .select('id,username,display_name')
+        .select('id,username,display_name,avatar_url')
         .in('id', userIds);
 
       if (profilesError) {
@@ -668,31 +683,37 @@ useEffect(() => {
       }
 
       const profileMap = new Map<string, {
-        id: string;
-        username: string | null;
-        display_name: string | null;
-      }>();
+  username: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+}>();
 
       for (const profile of (profiles ?? []) as Array<{
-        id: string;
-        username: string | null;
-        display_name: string | null;
-      }>) {
-        profileMap.set(profile.id, profile);
-      }
+  id: string;
+  username: string | null;
+  display_name: string | null;
+  avatar_url: string | null;
+}>) {
+  profileMap.set(profile.id, profile);
+}
 
       setLikeUsers(
-        userIds.map((userId) => {
+        await Promise.all(
+          userIds.map(async (userId) => {
           const profile = profileMap.get(userId);
           return {
-            id: userId,
-            displayName:
-              profile?.display_name ||
-              profile?.username ||
-              'DareShot User',
-            username: profile?.username ?? null,
-          };
-        }),
+  id: userId,
+  displayName:
+    profile?.display_name ||
+    profile?.username ||
+    'DareShot User',
+  username: profile?.username ?? null,
+  avatarUrl: profile?.avatar_url
+    ? await getR2MediaUrl(profile.avatar_url)
+    : null,
+};
+          }),
+        ),
       );
     } catch (error) {
       console.error('[Home] Load dare like users error:', error);
@@ -1576,10 +1597,17 @@ onSave={() => handleSaveDare(dare.id)}
                 likeUsers.map((user) => (
                   <View key={user.id} style={styles.likeUserRow}>
                     <View style={styles.likeUserAvatar}>
-                      <Text style={styles.likeUserAvatarText}>
-                        {user.displayName.charAt(0).toUpperCase()}
-                      </Text>
-                    </View>
+  {user.avatarUrl ? (
+    <Image
+      source={{ uri: user.avatarUrl }}
+      style={styles.likeUserAvatarImage}
+    />
+  ) : (
+    <Text style={styles.likeUserAvatarText}>
+      {user.displayName.charAt(0).toUpperCase()}
+    </Text>
+  )}
+</View>
                     <View style={styles.likeUserInfo}>
                       <Text style={styles.likeUserName}>
                         {user.displayName}
@@ -1633,21 +1661,31 @@ function DareCommentItem({
       ]}
     >
       <View style={styles.commentRow}>
-        <View
-          style={[
-            styles.commentAvatar,
-            depth > 0 && styles.replyAvatar,
-          ]}
-        >
-          <Text
-            style={[
-              styles.commentAvatarText,
-              depth > 0 && styles.replyAvatarText,
-            ]}
-          >
-            {comment.displayName.charAt(0).toUpperCase()}
-          </Text>
-        </View>
+      <View
+  style={[
+    styles.commentAvatar,
+    depth > 0 && styles.replyAvatar,
+  ]}
+>
+  {comment.avatarUrl ? (
+    <Image
+      source={{ uri: comment.avatarUrl }}
+      style={[
+        styles.commentAvatarImage,
+        depth > 0 && styles.replyAvatarImage,
+      ]}
+    />
+  ) : (
+    <Text
+      style={[
+        styles.commentAvatarText,
+        depth > 0 && styles.replyAvatarText,
+      ]}
+    >
+      {comment.displayName.charAt(0).toUpperCase()}
+    </Text>
+  )}
+</View>
 
         <View style={styles.commentBody}>
           <Text style={styles.commentUserName}>
@@ -1935,6 +1973,17 @@ menuLine: {
     color: colors.primaryText,
     fontWeight: '700',
   },
+
+commentAvatarImage: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+},
+replyAvatarImage: {
+  width: 30,
+  height: 30,
+  borderRadius: 15,
+},
 
   commentBody: {
     flex: 1,
@@ -2240,6 +2289,12 @@ menuLine: {
     color: colors.primaryText,
     fontWeight: '700',
   },
+
+  likeUserAvatarImage: {
+  width: 38,
+  height: 38,
+  borderRadius: 19,
+},
 
   likeUserInfo: {
     flex: 1,

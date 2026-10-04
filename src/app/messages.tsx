@@ -1,3 +1,4 @@
+import { getR2MediaUrl } from '@/features/onboarding/profileService';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
@@ -150,7 +151,14 @@ export default function MessagesScreen() {
           .in('id', otherIds);
 
         if (profileError) throw profileError;
-        profiles = (profileRows ?? []) as Profile[];
+        profiles = await Promise.all(
+  (profileRows ?? []).map(async (profile) => ({
+    ...(profile as Profile),
+    avatar_url: profile.avatar_url
+      ? await getR2MediaUrl(profile.avatar_url)
+      : null,
+  })),
+);
       }
 
       const profileMap = new Map(

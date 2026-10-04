@@ -1,3 +1,4 @@
+import { getR2MediaUrl } from '@/features/onboarding/profileService';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -382,7 +383,16 @@ if (loadedMessages.length > 0) {
           throw profileError;
         }
 
-        setProfile(profileRow as OtherProfile | null);
+        setProfile(
+  profileRow
+    ? {
+        ...(profileRow as OtherProfile),
+        avatar_url: profileRow.avatar_url
+          ? await getR2MediaUrl(profileRow.avatar_url)
+          : null,
+      }
+    : null,
+);
       }
 
       await markConversationRead(user.id, conversationId);
