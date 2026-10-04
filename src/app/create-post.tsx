@@ -641,13 +641,7 @@ const uploadedStoragePath =
        * =================================================
        */
 
-      if (uploadedStoragePath) {
-        await supabase.storage
-          .from('post-media')
-          .remove([
-            uploadedStoragePath,
-          ]);
-      }
+      
 
       /*
        * =================================================

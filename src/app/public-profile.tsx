@@ -193,16 +193,30 @@ setProfile(profileWithAvatar);
           post.media_url &&
           post.media_type === 'image'
         ) {
-          const { data: signedData } =
-            await supabase.storage
-              .from('post-media')
-              .createSignedUrl(
-                post.media_url,
-                60 * 60,
-              );
+          const {
+  data: signedData,
+  error: signedError,
+} = await supabase.functions.invoke(
+  'r2-media-url',
+  {
+    body: {
+      key: post.media_url,
+    },
+  },
+);
 
-          signedMediaUrl =
-            signedData?.signedUrl ?? null;
+if (signedError) {
+  console.error(
+    '[DareMe Public Profile] R2 media URL failed:',
+    signedError,
+  );
+} else if (
+  signedData?.success &&
+  signedData?.signedUrl
+) {
+  signedMediaUrl =
+    signedData.signedUrl;
+}
         }
 
         postsWithMedia.push({
