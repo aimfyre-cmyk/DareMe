@@ -449,23 +449,54 @@ export default function CreatePostScreen() {
             : 'image/jpeg');
 
         const {
-          error: uploadError,
-        } = await supabase.storage
-          .from('post-media')
-          .upload(
-            storagePath,
-            arrayBuffer,
-            {
-              contentType,
-              upsert: false,
-            },
-          );
+  data: uploadUrlData,
+  error: uploadUrlError,
+} = await supabase.functions.invoke(
+  'r2-upload-url',
+  {
+    body: {
+      fileName: storagePath,
+      contentType,
+    },
+  },
+);
 
-        if (uploadError) {
-          throw uploadError;
-        }
+if (uploadUrlError) {
+  throw uploadUrlError;
+}
 
-        uploadedStoragePath =
+if (
+  !uploadUrlData?.success ||
+  !uploadUrlData?.uploadUrl ||
+  !uploadUrlData?.key
+) {
+  throw new Error(
+    uploadUrlData?.error ??
+      'Unable to create R2 upload URL.',
+  );
+}
+
+const uploadResponse = await fetch(
+  uploadUrlData.uploadUrl,
+  {
+    method: 'PUT',
+    headers: {
+      'Content-Type': contentType,
+    },
+    body: arrayBuffer,
+  },
+);
+
+if (!uploadResponse.ok) {
+  throw new Error(
+    `R2 upload failed: ${uploadResponse.status}`,
+  );
+}
+
+const uploadedStoragePath =
+  uploadUrlData.key;
+
+        
           storagePath;
 
         /*
@@ -477,7 +508,7 @@ export default function CreatePostScreen() {
         } = await supabase
           .from('posts')
           .update({
-            media_url: storagePath,
+            media_url: uploadedStoragePath,
           })
           .eq('id', post.id)
           .eq('user_id', user.id);

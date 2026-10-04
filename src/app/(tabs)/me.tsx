@@ -15,7 +15,11 @@ import { Avatar } from '../../components/Avatar';
 import { IconButton } from '../../components/IconButton';
 import { Screen } from '../../components/Screen';
 import { colors, fontFamily, fontSize, radius, spacing } from '../../constants/theme';
-import { getProfile, uploadAvatar } from '../../features/onboarding/profileService';
+import {
+  getProfile,
+  getR2MediaUrl,
+  uploadAvatar,
+} from '../../features/onboarding/profileService';
 import { getCurrentSession, signOut } from '../../lib/auth';
 import { supabase } from '../../lib/supabase';
 
@@ -24,6 +28,7 @@ type Profile = {
   username: string;
   display_name: string;
   avatar_url: string | null;
+  avatarSignedUrl?: string | null;
   xp_total: number;
   level: number;
   streak_count: number;
@@ -40,6 +45,8 @@ type UserPost = {
 
 export default function MeScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [avatarSignedUrl, setAvatarSignedUrl] =
+  useState<string | null>(null);
   const [posts, setPosts] = useState<UserPost[]>([]);
   const [followersCount, setFollowersCount] = useState(0);
   const [followingCount, setFollowingCount] = useState(0);
@@ -76,15 +83,25 @@ export default function MeScreen() {
         return;
       }
 
-      setProfile({
-        id: userId,
-        username: data.username,
-        display_name: data.display_name,
-        avatar_url: data.avatar_url ?? null,
-        xp_total: data.xp_total ?? 0,
-        level: data.level ?? 1,
-        streak_count: data.streak_count ?? 0,
-      });
+      let signedAvatarUrl: string | null = null;
+
+if (data.avatar_url) {
+  signedAvatarUrl =
+    await getR2MediaUrl(data.avatar_url);
+}
+
+setAvatarSignedUrl(signedAvatarUrl);
+
+setProfile({
+  id: userId,
+  username: data.username,
+  display_name: data.display_name,
+  avatar_url: data.avatar_url ?? null,
+  avatarSignedUrl: signedAvatarUrl,
+  xp_total: data.xp_total ?? 0,
+  level: data.level ?? 1,
+  streak_count: data.streak_count ?? 0,
+});
 
       await Promise.all([
         loadFollowCounts(userId),
@@ -152,22 +169,32 @@ export default function MeScreen() {
             };
           }
 
-          const { data: signed, error: signedError } =
-            await supabase.storage
-              .from('post-media')
-              .createSignedUrl(post.media_url, 60 * 60);
+          const {
+  data: signed,
+  error: signedError,
+} = await supabase.functions.invoke(
+  'r2-media-url',
+  {
+    body: {
+      key: post.media_url,
+    },
+  },
+);
 
-          if (signedError) {
-            console.error(
-              '[DareMe Profile] Signed image URL failed:',
-              signedError,
-            );
-          }
+if (signedError) {
+  console.error(
+    '[DareMe Profile] R2 signed image URL failed:',
+    signedError,
+  );
+}
 
-          return {
-            ...post,
-            signedMediaUrl: signed?.signedUrl ?? null,
-          };
+return {
+  ...post,
+  signedMediaUrl:
+    signed?.success && signed?.signedUrl
+      ? signed.signedUrl
+      : null,
+};  
         }),
       );
 
@@ -240,14 +267,20 @@ export default function MeScreen() {
         throw updateError;
       }
 
-      setProfile((current) =>
-        current
-          ? {
-              ...current,
-              avatar_url: avatarUrl,
-            }
-          : current,
-      );
+      const newSignedAvatarUrl =
+  await getR2MediaUrl(avatarUrl);
+
+setAvatarSignedUrl(newSignedAvatarUrl);
+
+setProfile((current) =>
+  current
+    ? {
+        ...current,
+        avatar_url: avatarUrl,
+        avatarSignedUrl: newSignedAvatarUrl,
+      }
+    : current,
+);
     } catch (error) {
       console.error('[DareMe Avatar] Upload failed:', error);
       setErrorMessage(
@@ -304,12 +337,12 @@ export default function MeScreen() {
               uploadingAvatar && styles.avatarUploading,
             ]}
           >
-            {profile?.avatar_url ? (
+            {avatarSignedUrl ? (
               <Image
-                source={{ uri: profile.avatar_url }}
-                style={styles.profileAvatar}
-                resizeMode="cover"
-              />
+  source={{ uri: avatarSignedUrl }}
+  style={styles.profileAvatar}
+  resizeMode="cover"
+/>
             ) : (
               <Avatar size={64} />
             )}

@@ -72,69 +72,109 @@ export async function uploadAvatar(
   }
 
   try {
-    console.log('[DareMe Avatar] Reading local file:', localUri);
+    console.log(
+      '[DareMe Avatar] Reading local file:',
+      localUri,
+    );
 
     const file = new File(localUri);
-    const arrayBuffer = await file.arrayBuffer();
+    const arrayBuffer =
+      await file.arrayBuffer();
 
-    if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+    if (
+      !arrayBuffer ||
+      arrayBuffer.byteLength === 0
+    ) {
       throw new Error(
         'The selected profile photo is empty or could not be read.',
       );
     }
 
-    const filePath = `${userId}/${Date.now()}.jpg`;
+    const fileName =
+      `${userId}/${Date.now()}.jpg`;
+
+    const contentType = 'image/jpeg';
 
     console.log(
-      '[DareMe Avatar] Uploading:',
-      filePath,
+      '[DareMe Avatar] Requesting R2 upload URL:',
+      fileName,
     );
-
-    const { error: uploadError } =
-      await supabase.storage
-        .from('avatars')
-        .upload(filePath, arrayBuffer, {
-          contentType: 'image/jpeg',
-          cacheControl: '3600',
-          upsert: false,
-        });
-
-    if (uploadError) {
-      console.error(
-        '[DareMe Avatar] Storage upload failed:',
-        uploadError,
-      );
-
-      throw uploadError;
-    }
 
     const {
-      data: publicUrlData,
-    } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath);
+      data: uploadUrlData,
+      error: uploadUrlError,
+    } = await supabase.functions.invoke(
+      'r2-upload-url',
+      {
+        body: {
+          fileName,
+          contentType,
+          folder: 'avatars',
+        },
+      },
+    );
 
-    if (!publicUrlData?.publicUrl) {
+    if (uploadUrlError) {
+      throw uploadUrlError;
+    }
+
+    if (
+      !uploadUrlData?.success ||
+      !uploadUrlData?.uploadUrl ||
+      !uploadUrlData?.key
+    ) {
       throw new Error(
-        'Avatar uploaded, but its public URL could not be created.',
+        uploadUrlData?.error ??
+          'Unable to create R2 avatar upload URL.',
       );
     }
 
     console.log(
-      '[DareMe Avatar] Upload successful.',
+      '[DareMe Avatar] Uploading to R2:',
+      uploadUrlData.key,
     );
 
-    return publicUrlData.publicUrl;
+    const uploadResponse =
+      await fetch(
+        uploadUrlData.uploadUrl,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type':
+              contentType,
+          },
+          body: arrayBuffer,
+        },
+      );
+
+    if (!uploadResponse.ok) {
+      throw new Error(
+        `R2 avatar upload failed: ${uploadResponse.status}`,
+      );
+    }
+
+    console.log(
+      '[DareMe Avatar] R2 upload successful:',
+      uploadUrlData.key,
+    );
+
+    /*
+     * Store the R2 key in profiles.avatar_url.
+     *
+     * The actual signed URL will be generated
+     * when the avatar needs to be displayed.
+     */
+    return uploadUrlData.key;
   } catch (error) {
     console.error(
-      '[DareMe Avatar] File read/upload failed:',
+      '[DareMe Avatar] R2 upload failed:',
       error,
     );
 
     throw error instanceof Error
       ? error
       : new Error(
-          'Could not read the selected profile photo.',
+          'Could not upload the selected profile photo.',
         );
   }
 }
@@ -378,4 +418,55 @@ export async function saveCompleteOnboarding(
     interests: savedInterests,
     preferences: savedPreferences,
   };
+}
+export async function getR2MediaUrl(
+  key: string,
+): Promise<string | null> {
+  if (!key) {
+    return null;
+  }
+
+  try {
+    const {
+      data,
+      error,
+    } = await supabase.functions.invoke(
+      'r2-media-url',
+      {
+        body: {
+          key,
+        },
+      },
+    );
+
+    if (error) {
+      console.error(
+        '[DareMe R2] Media URL failed:',
+        error,
+      );
+
+      return null;
+    }
+
+    if (
+      !data?.success ||
+      !data?.signedUrl
+    ) {
+      console.error(
+        '[DareMe R2] Invalid media URL response:',
+        data,
+      );
+
+      return null;
+    }
+
+    return data.signedUrl;
+  } catch (error) {
+    console.error(
+      '[DareMe R2] Media URL error:',
+      error,
+    );
+
+    return null;
+  }
 }

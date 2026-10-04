@@ -34,6 +34,7 @@ import {
   fontSize,
   spacing,
 } from '../../constants/theme';
+import { getR2MediaUrl } from '../../features/onboarding/profileService';
 import { transitionDare } from '../../lib/dareTransitions';
 import { supabase } from '../../lib/supabase';
 
@@ -66,6 +67,7 @@ type PostProfile = {
   username: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  signedAvatarUrl?: string | null;
 };
 
 type PostLike = {
@@ -252,11 +254,37 @@ export default function DiscoverScreen() {
       >();
 
       for (const profile of profiles ?? []) {
-        profileMap.set(
-          profile.id,
-          profile as PostProfile,
-        );
-      }
+  let signedAvatarUrl: string | null = null;
+
+  if (profile.avatar_url) {
+    // First try Cloudflare R2
+    signedAvatarUrl =
+      await getR2MediaUrl(profile.avatar_url);
+
+    // Fallback for old Supabase Storage avatars
+    if (
+  !signedAvatarUrl &&
+  profile.avatar_url
+) {
+  if (
+    profile.avatar_url.startsWith(
+      'http://',
+    ) ||
+    profile.avatar_url.startsWith(
+      'https://',
+    )
+  ) {
+    signedAvatarUrl =
+      profile.avatar_url;
+  }
+}
+  }
+
+  profileMap.set(profile.id, {
+    ...(profile as PostProfile),
+    signedAvatarUrl,
+  });
+}
 
       const feedPosts: FeedPost[] = [];
 
@@ -268,17 +296,32 @@ export default function DiscoverScreen() {
   (post.media_type === 'image' ||
     post.media_type === 'video')
 ) {
-          const { data: signedData } =
-            await supabase.storage
-              .from('post-media')
-              .createSignedUrl(
-                post.media_url,
-                60 * 60,
-              );
+  const {
+    data: signedData,
+    error: signedError,
+  } = await supabase.functions.invoke(
+    'r2-media-url',
+    {
+      body: {
+        key: post.media_url,
+      },
+    },
+  );
 
-          signedMediaUrl =
-            signedData?.signedUrl ?? null;
-        }
+  if (signedError) {
+    console.error(
+      '[DareMe] R2 media URL failed:',
+      signedError,
+    );
+  } else if (
+    signedData?.success &&
+    signedData?.signedUrl
+  ) {
+    signedMediaUrl =
+      signedData.signedUrl;
+  }
+}
+          
 
         /* ============================= */
         /* LIKE COUNT                     */
@@ -1008,14 +1051,14 @@ screenFocused,
         accessibilityRole="button"
         accessibilityLabel={`Open ${displayName}'s profile`}
       >
-        {post.profile?.avatar_url ? (
-          <Image
-            source={{
-              uri: post.profile.avatar_url,
-            }}
-            style={styles.avatar}
-          />
-        ) : (
+        {post.profile?.signedAvatarUrl ? (
+  <Image
+    source={{
+      uri: post.profile.signedAvatarUrl,
+    }}
+    style={styles.avatar}
+  />
+) : (
           <View
             style={
               styles.avatarFallback
@@ -1303,11 +1346,7 @@ function PostVideo({
   /*
    * Always pause when component unmounts.
    */
-  useEffect(() => {
-    return () => {
-      player.pause();
-    };
-  }, [player]);
+  
 
   const toggleMute = () => {
     const nextMuted = !muted;

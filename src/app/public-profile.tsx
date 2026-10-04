@@ -20,6 +20,9 @@ import {
   fontSize,
   spacing,
 } from '../constants/theme';
+import {
+  getR2MediaUrl,
+} from '../features/onboarding/profileService';
 import { supabase } from '../lib/supabase';
 
 type Profile = {
@@ -113,7 +116,22 @@ export default function PublicProfileScreen() {
         throw profileError;
       }
 
-      setProfile(profileData as Profile);
+      
+      let profileWithAvatar = profileData as Profile;
+
+if (profileWithAvatar.avatar_url) {
+  const signedAvatarUrl =
+    await getR2MediaUrl(
+      profileWithAvatar.avatar_url,
+    );
+
+  profileWithAvatar = {
+    ...profileWithAvatar,
+    avatar_url: signedAvatarUrl,
+  };
+}
+
+setProfile(profileWithAvatar);
 
       const [
         followersResult,
@@ -431,13 +449,13 @@ export default function PublicProfileScreen() {
         {/* Profile identity */}
         <View style={styles.profileSection}>
           {profile.avatar_url ? (
-            <Image
-              source={{
-                uri: profile.avatar_url,
-              }}
-              style={styles.avatar}
-            />
-          ) : (
+  <Image
+    source={{
+      uri: profile.avatar_url,
+    }}
+    style={styles.avatar}
+  />
+) : (
             <View
               style={styles.avatarFallback}
             >

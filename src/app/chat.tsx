@@ -5,18 +5,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Modal,
-  Platform,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Screen } from '../components/Screen';
 import { colors, fontSize, spacing } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 
@@ -29,6 +31,7 @@ type Message = {
   media_url: string | null;
   reply_to_message_id: string | null;
   created_at: string;
+  expires_at: string | null;
   edited_at: string | null;
   deleted_at: string | null;
 };
@@ -41,6 +44,8 @@ type OtherProfile = {
 };
 
 export default function ChatScreen() {
+  const insets = useSafeAreaInsets();
+
   const params = useLocalSearchParams<{
     conversationId?: string;
     userId?: string;
@@ -58,6 +63,79 @@ export default function ChatScreen() {
     null,
   );
   const [messages, setMessages] = useState<Message[]>([]);
+  const [showChatSettings, setShowChatSettings] = useState(false);
+  const [disappearingMode, setDisappearingMode] = useState<
+  'off' | 'after_seen' | '1_hour' | '24_hours'
+>('off');
+const handleExitChat = async () => {
+  if (
+    disappearingMode === 'after_seen' &&
+    currentUserId &&
+    messages.length > 0
+  ) {
+    const rows = messages
+      .map((message) => ({
+        message_id: message.id,
+        user_id: currentUserId,
+        seen_at: new Date().toISOString(),
+        disappear_on_next_open: true,
+      }));
+
+    if (rows.length > 0) {
+      const { error } = await supabase
+        .from('direct_message_user_states')
+        .upsert(rows, {
+          onConflict: 'message_id,user_id',
+        });
+
+      if (error) {
+        console.error(
+          '[DareMe Messaging] Failed to mark disappearing messages:',
+          error,
+        );
+      }
+    }
+  }
+
+  router.back();
+};
+  const saveDisappearingMode = async (
+  mode: 'off' | 'after_seen' | '1_hour' | '24_hours',
+) => {
+  if (!currentUserId || !conversationId) {
+    return;
+  }
+
+  const { error } = await supabase
+    .from('direct_conversation_settings')
+    .upsert(
+      {
+        conversation_id: conversationId,
+        disappearing_mode: mode,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: 'conversation_id',
+      },
+    );
+
+  if (error) {
+    console.error(
+      '[DareMe Messaging] Failed to save disappearing mode:',
+      error,
+    );
+
+    Alert.alert(
+      'Error',
+      'Disappearing Messages setting save nahi ho saki.',
+    );
+
+    return;
+  }
+
+  setDisappearingMode(mode);
+  setShowChatSettings(false);
+};
   const [profile, setProfile] = useState<OtherProfile | null>(null);
   const [input, setInput] = useState('');
   const [emojiPickerVisible, setEmojiPickerVisible] = useState(false);
@@ -74,10 +152,36 @@ export default function ChatScreen() {
 >([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [otherUserLastReadAt, setOtherUserLastReadAt] =
+  useState<string | null>(null);
+  const [showSeenTime, setShowSeenTime] = useState(false);
+  const [messageUserStates, setMessageUserStates] = useState<
+  {
+    message_id: string;
+    user_id: string;
+    seen_at: string | null;
+    disappear_on_next_open: boolean;
+  }[]
+>([]);
 
   const listRef = useRef<FlatList<Message>>(null);
+  const swipeValues = useRef<Record<string, Animated.Value>>({}).current;
+const loadChat = useCallback(async () => {
+  const { data: settingsRow, error: settingsError } =
+  await supabase
+    .from('direct_conversation_settings')
+    .select('disappearing_mode')
+    .eq('conversation_id', conversationId)
+    .maybeSingle();
 
-  const loadChat = useCallback(async () => {
+if (settingsError) {
+  console.warn(
+    '[DareMe Messaging] Failed to load conversation settings:',
+    settingsError,
+  );
+} else if (settingsRow?.disappearing_mode) {
+  setDisappearingMode(settingsRow.disappearing_mode);
+}
     try {
       setLoading(true);
       setError(null);
@@ -114,6 +218,7 @@ export default function ChatScreen() {
               media_url,
               reply_to_message_id,
               created_at,
+              expires_at,
               edited_at,
               deleted_at
             `,
@@ -126,9 +231,112 @@ export default function ChatScreen() {
         throw messagesError;
       }
 
-      const loadedMessages = (messageRows ?? []) as Message[];
+      const now = Date.now();
 
-setMessages(loadedMessages);
+const loadedMessages = (
+  (messageRows ?? []) as Message[]
+).filter((message) => {
+  if (!message.expires_at) {
+    return true;
+  }
+
+  return (
+    new Date(message.expires_at).getTime() > now
+  );
+});
+const messagesToShow =
+  disappearingMode === 'after_seen'
+    ? loadedMessages.filter((message) => {
+        const state = (userStateRows ?? []).find(
+          (item) =>
+            item.message_id === message.id &&
+            item.user_id === user.id,
+        );
+
+        return !state?.disappear_on_next_open;
+      })
+    : loadedMessages;
+const { data: userStateRows, error: userStatesError } =
+  await supabase
+    .from('direct_message_user_states')
+    .select(
+      'message_id, user_id, seen_at, disappear_on_next_open',
+    )
+    .eq('user_id', user.id)
+    .in(
+      'message_id',
+      loadedMessages.map((message) => message.id),
+    );
+
+if (userStatesError) {
+  console.warn(
+    '[DareMe Messaging] Failed to load message states:',
+    userStatesError,
+  );
+}
+if (!userStatesError) {
+  const loadedUserStates = userStateRows ?? [];
+
+  setMessageUserStates(loadedUserStates);
+
+  const hiddenMessageIds = new Set(
+    loadedUserStates
+      .filter(
+        (state) => state.disappear_on_next_open,
+      )
+      .map((state) => state.message_id),
+  );
+
+  const visibleMessages =
+    disappearingMode === 'after_seen'
+      ? loadedMessages.filter(
+          (message) =>
+            !hiddenMessageIds.has(message.id),
+        )
+      : loadedMessages;
+
+  setMessages(visibleMessages);
+}
+if (!userStatesError) {
+  const loadedUserStates = userStateRows ?? [];
+
+setMessageUserStates(loadedUserStates);
+
+const hiddenMessageIds = new Set(
+  loadedUserStates
+    .filter(
+      (state) => state.disappear_on_next_open,
+    )
+    .map((state) => state.message_id),
+);
+
+setMessages((current) =>
+  current.filter(
+    (message) =>
+      !hiddenMessageIds.has(message.id),
+  ),
+);
+}
+if (otherUserId && conversationId) {
+  const { data: otherReadRow, error: otherReadError } =
+    await supabase
+      .from('direct_message_reads')
+      .select('last_read_at')
+      .eq('conversation_id', conversationId)
+      .eq('user_id', otherUserId)
+      .maybeSingle();
+
+  if (otherReadError) {
+    console.warn(
+      'Unable to load other user read state:',
+      otherReadError,
+    );
+  } else {
+    setOtherUserLastReadAt(
+      otherReadRow?.last_read_at ?? null,
+    );
+  }
+}
 
 if (loadedMessages.length > 0) {
   const { data: reactionRows, error: reactionsError } =
@@ -178,6 +386,33 @@ if (loadedMessages.length > 0) {
       }
 
       await markConversationRead(user.id, conversationId);
+      if (loadedMessages.length > 0) {
+  const seenRows = loadedMessages
+    .filter(
+      (message) => message.sender_id !== user.id,
+    )
+    .map((message) => ({
+      message_id: message.id,
+      user_id: user.id,
+      seen_at: new Date().toISOString(),
+      disappear_on_next_open: false,
+    }));
+
+  if (seenRows.length > 0) {
+    const { error: seenStateError } = await supabase
+      .from('direct_message_user_states')
+      .upsert(seenRows, {
+        onConflict: 'message_id,user_id',
+      });
+
+    if (seenStateError) {
+      console.warn(
+        '[DareMe Messaging] Failed to save message seen states:',
+        seenStateError,
+      );
+    }
+  }
+}
     } catch (err: any) {
       console.error('Chat load error:', err);
 
@@ -224,6 +459,7 @@ if (loadedMessages.length > 0) {
       return;
     }
 
+    
     const channel = supabase
       .channel(`chat:${conversationId}`)
 
@@ -239,6 +475,13 @@ if (loadedMessages.length > 0) {
         (payload) => {
           const newMessage =
             payload.new as Message;
+            if (
+  newMessage.expires_at &&
+  new Date(newMessage.expires_at).getTime() <=
+    Date.now()
+) {
+  return;
+}
 
           setMessages((current) => {
             if (
@@ -349,6 +592,7 @@ if (loadedMessages.length > 0) {
           schema: 'public',
           table: 'direct_message_reactions',
         },
+        
         (payload) => {
           const deletedReaction =
             payload.old as {
@@ -370,6 +614,58 @@ if (loadedMessages.length > 0) {
         },
       )
 
+      // Read state created
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'direct_message_reads',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const newRead = payload.new as {
+            conversation_id: string;
+            user_id: string;
+            last_read_at: string;
+          };
+
+          if (newRead.user_id !== otherUserId) {
+            return;
+          }
+
+          setOtherUserLastReadAt(
+            newRead.last_read_at,
+          );
+        },
+      )
+
+            // Read state changed
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'direct_message_reads',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        (payload) => {
+          const updatedRead = payload.new as {
+            conversation_id: string;
+            user_id: string;
+            last_read_at: string;
+          };
+
+          if (updatedRead.user_id !== otherUserId) {
+            return;
+          }
+
+          setOtherUserLastReadAt(
+            updatedRead.last_read_at,
+          );
+        },
+      )
+
       .subscribe();
 
     return () => {
@@ -381,17 +677,36 @@ if (loadedMessages.length > 0) {
     markConversationRead,
   ]);
 
-  useEffect(() => {
-    if (messages.length === 0) {
-      return;
-    }
+  
 
-    requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({
-        animated: true,
-      });
-    });
-  }, [messages.length]);
+  useEffect(() => {
+  if (messages.length === 0) {
+    return;
+  }
+
+  const timer = setInterval(() => {
+    const now = Date.now();
+
+    setMessages((current) =>
+      current.filter((message) => {
+        if (!message.expires_at) {
+          return true;
+        }
+
+        return (
+          new Date(message.expires_at).getTime() >
+          now
+        );
+      }),
+    );
+  }, 1000);
+
+  return () => {
+    clearInterval(timer);
+  };
+}, [messages.length]);
+
+
 
   const title = useMemo(() => {
     return (
@@ -578,6 +893,19 @@ const deleteMessage = async (message: Message) => {
   };
   const sendMessage = async () => {
     const content = input.trim();
+    let expiresAt: string | null = null;
+
+if (disappearingMode === '1_hour') {
+  expiresAt = new Date(
+    Date.now() + 60 * 60 * 1000,
+  ).toISOString();
+}
+
+if (disappearingMode === '24_hours') {
+  expiresAt = new Date(
+    Date.now() + 24 * 60 * 60 * 1000,
+  ).toISOString();
+}
 
     if (!content || !conversationId || !currentUserId) {
       return;
@@ -594,6 +922,7 @@ const deleteMessage = async (message: Message) => {
   message_type: 'text',
   content,
   reply_to_message_id: replyingTo?.id ?? null,
+  expires_at: expiresAt,
 })
         .select(
           `
@@ -605,6 +934,7 @@ const deleteMessage = async (message: Message) => {
             media_url,
             reply_to_message_id,
             created_at,
+            expires_at,
             edited_at,
             deleted_at
           `,
@@ -643,146 +973,256 @@ const deleteMessage = async (message: Message) => {
   };
 
     const renderMessage = ({
-    item,
-  }: {
-    item: Message;
-  }) => {
-    const mine = item.sender_id === currentUserId;
+      item,
+    }: {
+      item: Message;
+    }) => {
+      const mine = item.sender_id === currentUserId;
+      const latestMessage =
+        messages[messages.length - 1];
 
-    const repliedMessage = item.reply_to_message_id
-      ? messages.find(
-          (message) =>
-            message.id === item.reply_to_message_id,
-        )
-      : null;
+      const isLatestMessage =
+        latestMessage?.id === item.id;
 
-    const reactionsForMessage =
-      messageReactions.filter(
-        (reaction) =>
-          reaction.message_id === item.id,
-      );
+      const repliedMessage = item.reply_to_message_id
+        ? messages.find(
+            (message) =>
+              message.id === item.reply_to_message_id,
+          )
+        : null;
 
-    return (
-      <View
-        style={[
-          styles.messageRow,
-          mine && styles.messageRowMine,
-        ]}
-      >
-        <Pressable
-          onLongPress={() => {
-            setReactionMessage(item);
-          }}
+      const reactionsForMessage =
+        messageReactions.filter(
+          (reaction) =>
+            reaction.message_id === item.id,
+        );
+
+      // Each receiver message gets its own swipe value.
+      // This prevents one message swipe from moving the whole list.
+      const messageSwipeX =
+        swipeValues[item.id] ??
+        (swipeValues[item.id] = new Animated.Value(0));
+
+      const panResponder = PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          return (
+            !mine &&
+            gestureState.dx > 12 &&
+            Math.abs(gestureState.dx) >
+              Math.abs(gestureState.dy) * 1.2
+          );
+        },
+
+        onPanResponderMove: (_, gestureState) => {
+          if (mine) {
+            return;
+          }
+
+          messageSwipeX.setValue(
+            Math.max(0, Math.min(gestureState.dx, 72)),
+          );
+        },
+
+        onPanResponderRelease: (_, gestureState) => {
+          if (!mine) {
+            if (gestureState.dx >= 50) {
+              setReplyingTo(item);
+            }
+          }
+
+          Animated.spring(messageSwipeX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+
+        onPanResponderTerminate: () => {
+          Animated.spring(messageSwipeX, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+      });
+
+      return (
+        <View
           style={[
-            styles.messageBubble,
-            mine && styles.messageBubbleMine,
+            styles.messageRow,
+            mine && styles.messageRowMine,
           ]}
         >
-          {repliedMessage ? (
-            <View style={styles.quotedMessage}>
-              <Text
-                style={styles.quotedMessageSender}
-              >
-                {repliedMessage.sender_id === currentUserId
-                  ? 'You'
-                  : title}
-              </Text>
-
-              <Text
-                numberOfLines={2}
-                style={styles.quotedMessageText}
-              >
-                {repliedMessage.content ||
-                  'Media message'}
-              </Text>
-            </View>
-          ) : null}
-
-          <Text
+          <Animated.View
             style={[
-              styles.messageText,
-              mine && styles.messageTextMine,
+              styles.messageSwipeTarget,
+              mine
+                ? styles.messageSwipeTargetMine
+                : styles.messageSwipeTargetReceiver,
+              {
+                transform: [
+                  {
+                    translateX: !mine ? messageSwipeX : 0,
+                  },
+                ],
+              },
             ]}
+            {...(!mine ? panResponder.panHandlers : {})}
           >
-            {item.content || ''}
-          </Text>
-
-          <Text
-            style={[
-              styles.messageTime,
-              mine && styles.messageTimeMine,
-            ]}
-          >
-            {new Date(
-              item.created_at,
-            ).toLocaleTimeString([], {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-          </Text>
-        </Pressable>
-
-        {reactionsForMessage.length > 0 ? (
-          <View style={styles.reactionSummary}>
-            {(
-              [
-                'like',
-                'laugh',
-                'angry',
-                'confuse',
-              ] as const
-            ).map((reactionType) => {
-              const count =
-                reactionsForMessage.filter(
-                  (reaction) =>
-                    reaction.reaction ===
-                    reactionType,
-                ).length;
-
-              if (count === 0) {
-                return null;
-              }
-
-              const emoji =
-                reactionType === 'like'
-                  ? '❤️'
-                  : reactionType === 'laugh'
-                    ? '😂'
-                    : reactionType === 'angry'
-                      ? '😡'
-                      : '😕';
-
-              return (
-                <View
-                  key={reactionType}
-                  style={styles.reactionChip}
-                >
+            <Pressable
+              onPress={() => {
+                if (
+                  mine &&
+                  isLatestMessage &&
+                  otherUserLastReadAt &&
+                  new Date(otherUserLastReadAt).getTime() >=
+                    new Date(item.created_at).getTime()
+                ) {
+                  setShowSeenTime((current) => !current);
+                }
+              }}
+              onLongPress={() => {
+                setReactionMessage(item);
+              }}
+              style={[
+                styles.messageBubble,
+                mine && styles.messageBubbleMine,
+              ]}
+            >
+              {repliedMessage ? (
+                <View style={styles.quotedMessage}>
                   <Text
-                    style={
-                      styles.reactionChipEmoji
-                    }
+                    style={styles.quotedMessageSender}
                   >
-                    {emoji}
+                    {repliedMessage.sender_id === currentUserId
+                      ? 'You'
+                      : title}
                   </Text>
 
                   <Text
-                    style={
-                      styles.reactionChipCount
-                    }
+                    numberOfLines={2}
+                    style={styles.quotedMessageText}
                   >
-                    {count}
+                    {repliedMessage.content ||
+                      'Media message'}
                   </Text>
                 </View>
-              );
-            })}
-          </View>
-        ) : null}
-      </View>
-    );
-  };
+              ) : null}
+
+              <Text
+                style={[
+                  styles.messageText,
+                  mine && styles.messageTextMine,
+                ]}
+              >
+                {item.content || ''}
+              </Text>
+
+              <Text
+                style={[
+                  styles.messageTime,
+                  mine && styles.messageTimeMine,
+                ]}
+              >
+                {new Date(
+                  item.created_at,
+                ).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </Text>
+
+              {mine && isLatestMessage ? (
+                <Text
+                  style={[
+                    styles.messageStatus,
+                    styles.messageStatusMine,
+                  ]}
+                >
+                  {otherUserLastReadAt &&
+                  new Date(otherUserLastReadAt).getTime() >=
+                    new Date(item.created_at).getTime()
+                    ? showSeenTime
+                      ? `Seen · ${new Date(
+                          otherUserLastReadAt,
+                        ).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}`
+                      : 'Seen'
+                    : 'Delivered'}
+                </Text>
+              ) : null}
+            </Pressable>
+          </Animated.View>
+
+          {reactionsForMessage.length > 0 ? (
+            <View style={styles.reactionSummary}>
+              {(
+                [
+                  'like',
+                  'laugh',
+                  'angry',
+                  'confuse',
+                ] as const
+              ).map((reactionType) => {
+                const count =
+                  reactionsForMessage.filter(
+                    (reaction) =>
+                      reaction.reaction ===
+                      reactionType,
+                  ).length;
+
+                if (count === 0) {
+                  return null;
+                }
+
+                const emoji =
+                  reactionType === 'like'
+                    ? '❤️'
+                    : reactionType === 'laugh'
+                      ? '😂'
+                      : reactionType === 'angry'
+                        ? '😡'
+                        : '😕';
+
+                return (
+                  <View
+                    key={reactionType}
+                    style={styles.reactionChip}
+                  >
+                    <Text
+                      style={
+                        styles.reactionChipEmoji
+                      }
+                    >
+                      {emoji}
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.reactionChipCount
+                      }
+                    >
+                      {count}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
+      );
+    };
+
 
   return (
-    <Screen>
+    <View
+      style={[
+        styles.root,
+        {
+          paddingTop: insets.top,
+        },
+      ]}
+    >
       <Modal
   visible={!!reactionMessage}
   transparent
@@ -871,31 +1311,70 @@ const deleteMessage = async (message: Message) => {
     </Pressable>
   </Pressable>
 </Modal>
-      <KeyboardAvoidingView
-        style={styles.keyboardArea}
-        behavior={
-          Platform.OS === 'ios' ? 'padding' : undefined
-        }
+      <View
+        style={[
+          styles.header,
+          {
+            height: 56 + insets.top,
+            paddingTop: insets.top,
+          },
+        ]}
       >
-        <View style={styles.header}>
+<Pressable
+  onPress={handleExitChat}
+  style={styles.headerButton}
+  hitSlop={8}
+>
+  <Ionicons
+    name="chevron-back"
+    size={25}
+    color={colors.primaryText}
+  />
+</Pressable>
+
           <Pressable
-            onPress={() => router.back()}
+            onPress={() => {
+            setShowChatSettings(true);
+          
+      }}
             style={styles.headerButton}
             hitSlop={8}
           >
             <Ionicons
-              name="chevron-back"
-              size={25}
+              name="ellipsis-vertical"
+              size={22}
               color={colors.primaryText}
             />
           </Pressable>
 
           <View style={styles.headerUser}>
-            <View style={styles.headerAvatar}>
-              <Text style={styles.headerAvatarText}>
-                {title.charAt(0).toUpperCase()}
-              </Text>
-            </View>
+            <Pressable
+  onPress={() => {
+    if (profile?.id) {
+      router.push({
+        pathname: '/public-profile',
+        params: {
+          userId: profile.id,
+        },
+      });
+    }
+  }}
+  style={styles.headerAvatarButton}
+  hitSlop={6}
+>
+  {profile?.avatar_url ? (
+    <Image
+      source={{ uri: profile.avatar_url }}
+      style={styles.headerAvatar}
+    />
+  ) : (
+    <View style={styles.headerAvatar}>
+      <Text style={styles.headerAvatarText}>
+        {title.charAt(0).toUpperCase()}
+      </Text>
+    </View>
+  )}
+</Pressable>
 
             <View style={styles.headerNameBlock}>
               <Text
@@ -917,8 +1396,12 @@ const deleteMessage = async (message: Message) => {
           </View>
 
           <View style={styles.headerButton} />
-        </View>
+      </View>
 
+      <KeyboardAvoidingView
+        style={styles.keyboardArea}
+        behavior="padding"
+      >
         {loading ? (
           <View style={styles.centerState}>
             <ActivityIndicator
@@ -955,6 +1438,7 @@ const deleteMessage = async (message: Message) => {
           <>
             <FlatList
               ref={listRef}
+               style={styles.chatList}
               data={messages}
               keyExtractor={(item) => item.id}
               renderItem={renderMessage}
@@ -1031,7 +1515,12 @@ const deleteMessage = async (message: Message) => {
     </Pressable>
   </View>
 ) : null}
-            <View style={styles.composer}>
+            <View
+              style={[
+                styles.composer,
+                { paddingBottom: Math.max(spacing.xs, insets.bottom) },
+              ]}
+            >
             <Pressable
   onPress={() => {
   setEmojiPickerVisible((current) => !current);
@@ -1088,24 +1577,201 @@ const deleteMessage = async (message: Message) => {
             </View>
           </>
         )}
+        <Modal
+  visible={showChatSettings}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setShowChatSettings(false)}
+>
+  <Pressable
+    style={styles.chatSettingsOverlay}
+    onPress={() => setShowChatSettings(false)}
+  >
+    <Pressable
+      style={styles.chatSettingsCard}
+      onPress={(event) => event.stopPropagation()}
+    >
+      <Text style={styles.chatSettingsTitle}>
+        Chat Settings
+      </Text>
+
+      <Text style={styles.chatSettingsSubtitle}>
+        Disappearing Messages
+      </Text>
+
+      <Text style={styles.chatSettingsHint}>
+        Choose when messages should disappear.
+      </Text>
+
+      <Pressable
+  style={[
+  styles.chatSettingOption,
+  disappearingMode === 'off' &&
+    styles.chatSettingOptionSelected,
+]}
+  onPress={() => {
+  saveDisappearingMode('off');
+}}
+>
+  <Text
+  style={[
+    styles.chatSettingOptionText,
+    disappearingMode === 'off' &&
+      styles.chatSettingOptionTextSelected,
+  ]}
+>
+  Off
+</Text>
+</Pressable>
+
+<Pressable
+  style={[
+  styles.chatSettingOption,
+  disappearingMode === 'after_seen' &&
+    styles.chatSettingOptionSelected,
+]}
+  onPress={() => {
+  saveDisappearingMode('after_seen');
+}}
+>
+  <Text
+  style={[
+    styles.chatSettingOptionText,
+    disappearingMode === 'after_seen' &&
+      styles.chatSettingOptionTextSelected,
+  ]}
+>
+  After Seen
+</Text>
+</Pressable>
+
+<Pressable
+  style={[
+  styles.chatSettingOption,
+  disappearingMode === '1_hour' &&
+    styles.chatSettingOptionSelected,
+]}
+  onPress={() => {
+  saveDisappearingMode('1_hour');
+}}
+>
+  <Text
+  style={[
+    styles.chatSettingOptionText,
+    disappearingMode === '1_hour' &&
+      styles.chatSettingOptionTextSelected,
+  ]}
+>
+  1 Hour
+</Text>
+</Pressable>
+
+<Pressable
+  style={[
+  styles.chatSettingOption,
+  disappearingMode === '24_hours' &&
+    styles.chatSettingOptionSelected,
+]}
+  onPress={() => {
+  saveDisappearingMode('24_hours');
+}}
+>
+  <Text
+  style={[
+    styles.chatSettingOptionText,
+    disappearingMode === '24_hours' &&
+      styles.chatSettingOptionTextSelected,
+  ]}
+>
+  24 Hours
+</Text>
+</Pressable>
+    </Pressable>
+  </Pressable>
+</Modal>
       </KeyboardAvoidingView>
-    </Screen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+
+  chatSettingOption: {
+  paddingVertical: 14,
+  paddingHorizontal: 14,
+  borderRadius: 12,
+  backgroundColor: colors.surface,
+  marginBottom: 8,
+},
+
+chatSettingOptionSelected: {
+  borderWidth: 2,
+  borderColor: colors.accent,
+  backgroundColor: colors.accent,
+},
+
+chatSettingOptionText: {
+  color: colors.primaryText,
+  fontSize: fontSize.md,
+  fontWeight: '700',
+},
+
+chatSettingOptionTextSelected: {
+  color: colors.background,
+  fontWeight: '800',
+},
+
   keyboardArea: {
     flex: 1,
   },
 
+  chatSettingsOverlay: {
+  flex: 1,
+  backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  justifyContent: 'flex-end',
+},
+
+chatSettingsCard: {
+  backgroundColor: colors.background,
+  borderTopLeftRadius: 22,
+  borderTopRightRadius: 22,
+  padding: spacing.lg,
+  paddingBottom: spacing.xl,
+},
+
+chatSettingsTitle: {
+  color: colors.primaryText,
+  fontSize: fontSize.lg,
+  fontWeight: '800',
+  marginBottom: spacing.md,
+},
+
+chatSettingsSubtitle: {
+  color: colors.primaryText,
+  fontSize: fontSize.md,
+  fontWeight: '700',
+},
+
+chatSettingsHint: {
+  color: colors.secondaryText,
+  fontSize: fontSize.sm,
+  marginTop: 4,
+  marginBottom: spacing.lg,
+},
+
   header: {
-    minHeight: 58,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
+    height: 56,
+    paddingHorizontal: spacing.xs,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  borderBottomWidth: 1,
+  borderBottomColor: colors.border,
+},
 
   headerButton: {
     width: 42,
@@ -1120,6 +1786,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+
+headerAvatarButton: {
+  width: 36,
+  height: 36,
+  borderRadius: 18,
+  overflow: 'hidden',
+},
 
   headerAvatar: {
     width: 36,
@@ -1157,6 +1830,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
+  chatList: {
+    flex: 1,
+    minHeight: 0,
+  },
+
   messagesContent: {
     flexGrow: 1,
     paddingTop: spacing.md,
@@ -1173,9 +1851,22 @@ const styles = StyleSheet.create({
   messageRowMine: {
     alignItems: 'flex-end',
   },
+  messageSwipeTarget: {
+    maxWidth: '78%',
+    alignSelf: 'flex-start',
+  },
+
+  messageSwipeTargetReceiver: {
+    alignSelf: 'flex-start',
+  },
+
+  messageSwipeTargetMine: {
+    alignSelf: 'flex-end',
+  },
 
   messageBubble: {
-    maxWidth: '78%',
+    width: 'auto',
+    maxWidth: '100%',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: 18,
@@ -1224,6 +1915,17 @@ quotedMessageText: {
   messageTextMine: {
     color: '#0B0B0D',
   },
+
+  messageStatus: {
+  marginTop: 2,
+  color: colors.secondaryText,
+  fontSize: 9,
+  fontWeight: '700',
+},
+
+messageStatusMine: {
+  color: 'rgba(11, 11, 13, 0.60)',
+},
 
   messageTime: {
     marginTop: 4,
@@ -1324,14 +2026,17 @@ replyCloseButton: {
 },
   composer: {
     minHeight: 58,
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.xs,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
+  paddingHorizontal: spacing.sm,
+  paddingTop: spacing.xs,
+  paddingBottom: spacing.xs,
+  flexDirection: 'row',
+  alignItems: 'flex-end',
+  gap: spacing.sm,
+  flexShrink: 0,
+  backgroundColor: colors.background,
+  borderTopWidth: 1,
+  borderTopColor: colors.border,
+},
   emojiButton: {
   width: 42,
   height: 42,
