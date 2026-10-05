@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   ImageBackground,
   Pressable,
@@ -5,8 +6,6 @@ import {
   Text,
   View,
 } from 'react-native';
-
-import Ionicons from '@expo/vector-icons/Ionicons';
 
 import {
   colors,
@@ -41,7 +40,6 @@ type DareCardProps = {
   likedByMe?: boolean;
   onLike?: () => void;
   onLikeCountPress?: () => void;
-
   onComment?: () => void;
   onShare?: () => void;
 
@@ -52,6 +50,14 @@ type DareCardProps = {
   /* Owner-only menu */
   isOwner?: boolean;
   onDelete?: () => void;
+
+  /* Public Dare / Pass */
+  onPassDare?: () => void;
+  passCount?: number;
+
+  /* Competition */
+  competitionCount?: number;
+  competitionLabel?: string;
 };
 
 const difficultyVariant: Record<
@@ -74,15 +80,21 @@ export function DareCard({
   commentCount = 0,
   likedByMe = false,
   onLike,
-onLikeCountPress,
-onComment,
-onShare,
+  onLikeCountPress,
+  onComment,
+  onShare,
 
   savedByMe = false,
   onSave,
 
   isOwner = false,
   onDelete,
+
+  onPassDare,
+  passCount = 0,
+
+  competitionCount = 0,
+  competitionLabel = 'Competition',
 }: DareCardProps) {
   const handlePrimaryPress = () => {
     if (loading) {
@@ -102,6 +114,15 @@ onShare,
     }
 
     onPress?.();
+  };
+
+  const handlePassPress = () => {
+    if (loading || !onPassDare) {
+      return;
+    }
+
+    console.log('[DareCard] PASS THIS DARE:', dare.id);
+    onPassDare();
   };
 
   const coverSource =
@@ -192,58 +213,97 @@ onShare,
       </View>
 
       {/* ================================================= */}
+      {/* PUBLIC DARE STATUS                                */}
+      {/* ================================================= */}
+
+      {(passCount > 0 || competitionCount > 0) ? (
+        <View style={styles.publicStatusRow}>
+          {passCount > 0 ? (
+            <View style={styles.statusPill}>
+              <Ionicons
+                name="repeat-outline"
+                size={15}
+                color={colors.secondaryText}
+              />
+
+              <Text style={styles.statusText}>
+                {passCount} {passCount === 1 ? 'pass' : 'passes'}
+              </Text>
+            </View>
+          ) : null}
+
+          {competitionCount > 0 ? (
+            <View style={styles.statusPill}>
+              <Ionicons
+                name="trophy-outline"
+                size={15}
+                color={colors.secondaryText}
+              />
+
+              <Text style={styles.statusText}>
+                {competitionCount}{' '}
+                {competitionLabel}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* ================================================= */}
       {/* SOCIAL ACTIONS                                    */}
       {/* ================================================= */}
 
       <View style={styles.actions}>
         {/* LIKE */}
-        {/* LIKE */}
-<View style={styles.likeActionGroup}>
-  <Pressable
-    style={styles.likeIconButton}
-    onPress={onLike}
-    disabled={!onLike}
-    accessibilityRole="button"
-    accessibilityLabel={
-      likedByMe
-        ? 'Unlike dare'
-        : 'Like dare'
-    }
-  >
-    <Ionicons
-      name={
-        likedByMe
-          ? 'heart'
-          : 'heart-outline'
-      }
-      size={22}
-      color={
-        likedByMe
-          ? '#FF4D67'
-          : colors.primaryText
-      }
-    />
-  </Pressable>
+        <View style={styles.likeActionGroup}>
+          <Pressable
+            style={styles.likeIconButton}
+            onPress={onLike}
+            disabled={!onLike}
+            accessibilityRole="button"
+            accessibilityLabel={
+              likedByMe
+                ? 'Unlike dare'
+                : 'Like dare'
+            }
+          >
+            <Ionicons
+              name={
+                likedByMe
+                  ? 'heart'
+                  : 'heart-outline'
+              }
+              size={22}
+              color={
+                likedByMe
+                  ? '#FF4D67'
+                  : colors.primaryText
+              }
+            />
+          </Pressable>
 
-  <Pressable
-    style={styles.likeCountButton}
-    onPress={onLikeCountPress}
-    disabled={!onLikeCountPress || likeCount === 0}
-    accessibilityRole="button"
-    accessibilityLabel="View people who liked this dare"
-  >
-    <Text
-      style={[
-        styles.actionText,
-        likedByMe && styles.likedText,
-      ]}
-    >
-      {likeCount > 0
-        ? likeCount
-        : 'Like'}
-    </Text>
-  </Pressable>
-</View>
+          <Pressable
+            style={styles.likeCountButton}
+            onPress={onLikeCountPress}
+            disabled={
+              !onLikeCountPress ||
+              likeCount === 0
+            }
+            accessibilityRole="button"
+            accessibilityLabel="View people who liked this dare"
+          >
+            <Text
+              style={[
+                styles.actionText,
+                likedByMe && styles.likedText,
+              ]}
+            >
+              {likeCount > 0
+                ? likeCount
+                : 'Like'}
+            </Text>
+          </Pressable>
+        </View>
 
         {/* COMMENT */}
         <Pressable
@@ -288,7 +348,6 @@ onShare,
         {/* SAVE */}
         <Pressable
           style={styles.actionButton}
-          
           onPress={onSave}
           disabled={!onSave}
           accessibilityRole="button"
@@ -315,6 +374,50 @@ onShare,
           </Text>
         </Pressable>
       </View>
+
+      {/* ================================================= */}
+      {/* PASS THIS DARE                                    */}
+      {/* ================================================= */}
+
+      {onPassDare ? (
+        <Pressable
+          onPress={handlePassPress}
+          disabled={loading}
+          accessibilityRole="button"
+          accessibilityLabel={`Pass this dare: ${dare.title}`}
+          testID={`pass-dare-${dare.id}`}
+          style={({ pressed }) => [
+            styles.passButton,
+            pressed && styles.passButtonPressed,
+          ]}
+        >
+          <View style={styles.passButtonContent}>
+            <View style={styles.passIconCircle}>
+              <Ionicons
+                name="repeat-outline"
+                size={19}
+                color={colors.accent}
+              />
+            </View>
+
+            <View style={styles.passTextContainer}>
+              <Text style={styles.passTitle}>
+                PASS THIS DARE
+              </Text>
+
+              <Text style={styles.passSubtitle}>
+                Challenge someone else
+              </Text>
+            </View>
+
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color={colors.secondaryText}
+            />
+          </View>
+        </Pressable>
+      ) : null}
 
       {/* ================================================= */}
       {/* CTA                                               */}
@@ -439,9 +542,39 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.xs,
   },
 
-    /* ===================================================== */
-  /* SOCIAL ACTION STYLES                                  */
-  /* ===================================================== */
+  /* =====================================================
+     PUBLIC DARE STATUS
+     ===================================================== */
+
+  publicStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+
+  statusPill: {
+    minHeight: 30,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+
+  statusText: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.xs,
+  },
+
+  /* =====================================================
+     SOCIAL ACTION STYLES
+     ===================================================== */
 
   actions: {
     flexDirection: 'row',
@@ -488,9 +621,65 @@ const styles = StyleSheet.create({
     color: '#FF4D67',
   },
 
-  /* ===================================================== */
-  /* CTA                                                   */
-  /* ===================================================== */
+  /* =====================================================
+     PASS THIS DARE
+     ===================================================== */
+
+  passButton: {
+    minHeight: 62,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+  },
+
+  passButtonPressed: {
+    opacity: 0.7,
+  },
+
+  passButtonContent: {
+    flex: 1,
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  passIconCircle: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+
+  passTextContainer: {
+    flex: 1,
+  },
+
+  passTitle: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+
+  passSubtitle: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.xs,
+    marginTop: 2,
+  },
+
+  /* =====================================================
+     CTA
+     ===================================================== */
 
   cta: {
     minHeight: 50,

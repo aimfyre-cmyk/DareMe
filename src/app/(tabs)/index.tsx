@@ -23,6 +23,9 @@ import { EmptyState } from '../../components/EmptyState';
 import { FloatingMessageButton } from '../../components/FloatingMessageButton';
 import { HomeMenu } from '../../components/HomeMenu';
 import { NotificationBell } from '../../components/NotificationBell';
+import PassDareModal, {
+  PassDarePerson,
+} from '../../components/PassDareModal';
 import { Screen } from '../../components/Screen';
 import { SectionHeader } from '../../components/SectionHeader';
 
@@ -136,6 +139,14 @@ export default function HomeScreen() {
   const [shareSearch, setShareSearch] = useState('');
   const [shareLoading, setShareLoading] = useState(false);
   const [shareSending, setShareSending] = useState(false);
+  const [passDare, setPassDare] = useState<HomeDare | null>(null);
+const [passPeople, setPassPeople] = useState<PassDarePerson[]>([]);
+const [passSearch, setPassSearch] = useState('');
+const [passLoading, setPassLoading] = useState(false);
+const [passSubmitting, setPassSubmitting] = useState(false);
+const [passSelectedUserId, setPassSelectedUserId] = useState<string | null>(
+  null,
+);
 
   const loadDares = useCallback(async () => {
     try {
@@ -819,6 +830,94 @@ useEffect(() => {
     }
   };
 
+const handlePassDare = async (dare: HomeDare) => {
+  if (!currentUserId) {
+    Alert.alert(
+      'Login required',
+      'Please log in before passing a dare.',
+    );
+    return;
+  }
+
+  setPassDare(dare);
+  setPassPeople([]);
+  setPassSearch('');
+  setPassSelectedUserId(null);
+  setPassLoading(true);
+
+  try {
+    const [followersResult, followingResult] = await Promise.all([
+      supabase
+        .from('follows')
+        .select('follower_id')
+        .eq('following_id', currentUserId),
+      supabase
+        .from('follows')
+        .select('following_id')
+        .eq('follower_id', currentUserId),
+    ]);
+
+    if (followersResult.error) {
+      throw followersResult.error;
+    }
+
+    if (followingResult.error) {
+      throw followingResult.error;
+    }
+
+    const personIds = Array.from(
+      new Set([
+        ...(followersResult.data ?? []).map(
+          (row: { follower_id: string }) => row.follower_id,
+        ),
+        ...(followingResult.data ?? []).map(
+          (row: { following_id: string }) => row.following_id,
+        ),
+      ]),
+    ).filter((id) => id !== currentUserId);
+
+    if (personIds.length === 0) {
+      setPassPeople([]);
+      return;
+    }
+
+    const { data: profiles, error: profilesError } = await supabase
+      .from('profiles')
+      .select('id,display_name,username,avatar_url')
+      .in('id', personIds);
+
+    if (profilesError) {
+      throw profilesError;
+    }
+
+    const people: PassDarePerson[] = ((profiles ?? []) as Array<{
+      id: string;
+      display_name: string | null;
+      username: string | null;
+      avatar_url: string | null;
+    }>).map((profile) => ({
+      id: profile.id,
+      displayName:
+        profile.display_name ||
+        profile.username ||
+        'DareShot User',
+      username: profile.username ?? null,
+      avatarUrl: profile.avatar_url ?? null,
+    }));
+
+    setPassPeople(people);
+  } catch (error) {
+    console.error('[Home] Load pass people error:', error);
+    Alert.alert(
+      'Pass unavailable',
+      'Could not load your friends and followers right now.',
+    );
+    setPassDare(null);
+  } finally {
+    setPassLoading(false);
+  }
+};
+
   const handleShare = async (dare: MockDare) => {
     if (!currentUserId) {
       Alert.alert('Login required', 'Please log in to share a dare.');
@@ -957,6 +1056,103 @@ useEffect(() => {
       Alert.alert('Share failed', 'Could not share this dare. Please try again.');
     } finally {
       setShareSending(false);
+    }
+  };
+
+  const handleConfirmPassDare = async () => {
+    if (
+      !passDare ||
+      !currentUserId ||
+      !passSelectedUserId ||
+      passSubmitting
+    ) {
+      return;
+    }
+
+    try {
+      setPassSubmitting(true);
+
+      const { data: participant, error: participantError } =
+        await supabase
+          .from('dare_participants')
+          .select('id,state')
+          .eq('dare_id', passDare.id)
+          .eq('user_id', currentUserId)
+          .maybeSingle();
+
+      if (participantError) {
+        throw participantError;
+      }
+
+      if (!participant) {
+        throw new Error('DARE_PARTICIPANT_NOT_FOUND');
+      }
+
+      if (participant.state !== 'COMPLETED') {
+        Alert.alert(
+          'Dare not completed',
+          'You can pass this Dare only after completing it.',
+        );
+        return;
+      }
+
+      const { error: passError } = await supabase.rpc(
+        'pass_dare_to_user',
+        {
+          p_participant_id: participant.id,
+          p_recipient_id: passSelectedUserId,
+        },
+      );
+
+      if (passError) {
+        throw passError;
+      }
+
+      const selectedPerson = passPeople.find(
+        (person) => person.id === passSelectedUserId,
+      );
+
+      setPassDare(null);
+      setPassPeople([]);
+      setPassSearch('');
+      setPassSelectedUserId(null);
+
+      Alert.alert(
+        '⚡ Dare Passed!',
+        selectedPerson
+          ? `${selectedPerson.displayName} can now continue this Dare.`
+          : 'The Dare has been passed successfully.',
+      );
+    } catch (error: any) {
+      console.error('[Home] Pass dare error:', error);
+
+      const message = String(
+        error?.message ?? error ?? '',
+      );
+
+      if (message.includes('DARE_NOT_COMPLETED')) {
+        Alert.alert(
+          'Dare not completed',
+          'Complete this Dare before passing it.',
+        );
+      } else if (message.includes('RECIPIENT_ALREADY_HAS_DARE')) {
+        Alert.alert(
+          'Already received',
+          'This person already has this Dare.',
+        );
+      } else if (message.includes('USER_BLOCKED')) {
+        Alert.alert(
+          'Cannot pass',
+          'You cannot pass this Dare to this user.',
+        );
+      } else {
+        Alert.alert(
+          'Pass failed',
+          'Could not pass this Dare. Please try again.',
+        );
+      }
+    } finally {
+      setPassSubmitting(false);
     }
   };
 
@@ -1168,6 +1364,7 @@ useEffect(() => {
               }}
               savedByMe={savedDares.has(dare.id)}
 onSave={() => handleSaveDare(dare.id)}
+onPassDare={() => handlePassDare(dare)}
             />
           ))}
 
@@ -1196,6 +1393,27 @@ onSave={() => handleSaveDare(dare.id)}
           description="Check back soon for fresh challenges, or explore Discover."
         />
       )}
+
+<PassDareModal
+  visible={passDare !== null}
+  people={passPeople}
+  search={passSearch}
+  loading={passLoading}
+  submitting={passSubmitting}
+  selectedUserId={passSelectedUserId}
+  onSearchChange={setPassSearch}
+  onSelect={setPassSelectedUserId}
+  onConfirm={handleConfirmPassDare}
+  onClose={() => {
+    if (!passSubmitting) {
+      setPassDare(null);
+      setPassPeople([]);
+      setPassSearch('');
+      setPassSelectedUserId(null);
+    }
+  }}
+/>
+
     </Screen>
           <FloatingMessageButton />
 

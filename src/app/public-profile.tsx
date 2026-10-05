@@ -103,7 +103,39 @@ export default function PublicProfileScreen() {
 
       setCurrentUserId(user?.id ?? null);
 
-      const { data: profileData, error: profileError } =
+// Instagram-style block protection:
+// If either user has blocked the other, the profile is invisible.
+if (user?.id && user.id !== userId) {
+  const { data: blockedRows, error: blockedError } =
+    await supabase.rpc('get_blocked_user_ids');
+
+  if (blockedError) {
+    throw blockedError;
+  }
+
+  const isBlocked = (blockedRows ?? []).some(
+    (row: { user_id: string | null }) =>
+      row.user_id === userId,
+  );
+
+  if (isBlocked) {
+    Alert.alert(
+      'Profile unavailable',
+      'This profile is not available.',
+      [
+        {
+          text: 'OK',
+          onPress: () => router.back(),
+        },
+      ],
+    );
+
+    setProfile(null);
+    return;
+  }
+}
+
+const { data: profileData, error: profileError } =
         await supabase
           .from('profiles')
           .select(

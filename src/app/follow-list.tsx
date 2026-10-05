@@ -41,67 +41,122 @@ export default function FollowListScreen() {
   }, [type]);
 
   const loadList = async () => {
-    setLoading(true);
-    setErrorMessage('');
+  setLoading(true);
+  setErrorMessage('');
 
-    try {
-      const session = await getCurrentSession();
+  try {
+    const session = await getCurrentSession();
 
-      if (!session?.user) {
-        router.replace('/(auth)/login' as any);
-        return;
-      }
+    if (!session?.user) {
+      router.replace('/(auth)/login' as any);
+      return;
+    }
 
-      const userId = session.user.id;
+    const userId = session.user.id;
 
-      const { data: followRows, error: followsError } = await supabase
+    // Instagram-style block protection:
+    // Users blocked by either side must not appear
+    // in Followers / Following.
+    const {
+      data: blockedRows,
+      error: blockedError,
+    } = await supabase.rpc('get_blocked_user_ids');
+
+    if (blockedError) {
+      throw blockedError;
+    }
+
+    const blockedUserIds = new Set(
+      (blockedRows ?? [])
+        .map(
+          (row: { user_id: string | null }) =>
+            row.user_id,
+        )
+        .filter(
+          (id: string | null): id is string =>
+            typeof id === 'string' && id.length > 0,
+        ),
+    );
+
+    const { data: followRows, error: followsError } =
+      await supabase
         .from('follows')
         .select('follower_id,following_id')
-        .eq(type === 'followers' ? 'following_id' : 'follower_id', userId);
+        .eq(
+          type === 'followers'
+            ? 'following_id'
+            : 'follower_id',
+          userId,
+        );
 
-      if (followsError) throw followsError;
+    if (followsError) {
+      throw followsError;
+    }
 
-      const rows = (followRows ?? []) as FollowRow[];
+    const rows = (followRows ?? []) as FollowRow[];
 
-      if (rows.length === 0) {
-        setProfiles([]);
-        return;
-      }
+    if (rows.length === 0) {
+      setProfiles([]);
+      return;
+    }
 
-      const ids = rows.map((row) =>
-        type === 'followers' ? row.follower_id : row.following_id,
-      );
+    const ids = rows
+      .map((row) =>
+        type === 'followers'
+          ? row.follower_id
+          : row.following_id,
+      )
+      .filter((id) => !blockedUserIds.has(id));
 
-      const { data: profileRows, error: profilesError } = await supabase
+    if (ids.length === 0) {
+      setProfiles([]);
+      return;
+    }
+
+    const { data: profileRows, error: profilesError } =
+      await supabase
         .from('profiles')
-        .select('id,username,display_name,avatar_url')
+        .select(
+          'id,username,display_name,avatar_url',
+        )
         .in('id', ids);
 
-      if (profilesError) throw profilesError;
+    if (profilesError) {
+      throw profilesError;
+    }
 
-      const profileMap = new Map(
-        ((profileRows ?? []) as Profile[]).map((profile) => [
+    const profileMap = new Map(
+      ((profileRows ?? []) as Profile[]).map(
+        (profile) => [
           profile.id,
           profile,
-        ]),
-      );
+        ],
+      ),
+    );
 
-      setProfiles(
-        ids
-          .map((id) => profileMap.get(id))
-          .filter((profile): profile is Profile => Boolean(profile)),
-      );
-    } catch (error) {
-      console.error('[DareShot user Follow List] Failed to load:', error);
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : `Could not load ${title.toLowerCase()}.`,
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+    setProfiles(
+      ids
+        .map((id) => profileMap.get(id))
+        .filter(
+          (profile): profile is Profile =>
+            Boolean(profile),
+        ),
+    );
+  } catch (error) {
+    console.error(
+      '[DareShot user Follow List] Failed to load:',
+      error,
+    );
+
+    setErrorMessage(
+      error instanceof Error
+        ? error.message
+        : `Could not load ${title.toLowerCase()}.`,
+    );
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <Screen>

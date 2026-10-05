@@ -64,80 +64,117 @@ export default function SearchScreen() {
   }, [cleanQuery]);
 
   const runSearch = async () => {
-    if (!cleanQuery) {
-      setError('Type something to search.');
-      return;
-    }
+  if (!cleanQuery) {
+    setError('Type something to search.');
+    return;
+  }
 
-    Keyboard.dismiss();
-    setLoading(true);
-    setSearched(true);
-    setError('');
+  Keyboard.dismiss();
+  setLoading(true);
+  setSearched(true);
+  setError('');
 
-    try {
-      const searchTerm = `%${cleanQuery}%`;
+  try {
+    const searchTerm = `%${cleanQuery}%`;
 
-      if (activeTab === 'People') {
-        const { data, error: searchError } =
-          await supabase
-            .from('profiles')
-            .select(
-              'id,username,display_name,bio,avatar_url',
-            )
-            .eq('profile_visibility', 'anyone')
-            .or(
-              `username.ilike.${searchTerm},display_name.ilike.${searchTerm},bio.ilike.${searchTerm}`,
-            )
-            .order('display_name', {
-              ascending: true,
-            })
-            .limit(30);
+    if (activeTab === 'People') {
+      // Get every user blocked in either direction.
+      // Instagram-style: blocked users are invisible to each other.
+      const {
+        data: blockedRows,
+        error: blockedError,
+      } = await supabase.rpc('get_blocked_user_ids');
 
-        if (searchError) {
-          throw searchError;
-        }
-
-        setPeople((data ?? []) as PersonResult[]);
-      } else {
-        const { data, error: searchError } =
-          await supabase
-            .from('dares')
-            .select(
-              'id,title,description,category,difficulty,xp_value',
-            )
-            .eq('status', 'active')
-            .or(
-              `title.ilike.${searchTerm},description.ilike.${searchTerm},category.ilike.${searchTerm}`,
-            )
-            .order('created_at', {
-              ascending: false,
-            })
-            .limit(30);
-
-        if (searchError) {
-          throw searchError;
-        }
-
-        setDares((data ?? []) as DareResult[]);
+      if (blockedError) {
+        throw blockedError;
       }
-    } catch (err) {
-      console.error(
-        '[DareMe Search] Search failed:',
-        err,
+
+      const blockedUserIds = Array.from(
+        new Set(
+          (blockedRows ?? [])
+            .map((row: { user_id: string | null }) => row.user_id)
+            .filter(
+              (id: string | null): id is string =>
+                typeof id === 'string' && id.length > 0,
+            ),
+        ),
       );
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : 'Search failed. Please try again.',
-      );
+      let profileQuery = supabase
+        .from('profiles')
+        .select(
+          'id,username,display_name,bio,avatar_url',
+        )
+        .eq('profile_visibility', 'anyone')
+        .or(
+          `username.ilike.${searchTerm},display_name.ilike.${searchTerm},bio.ilike.${searchTerm}`,
+        )
+        .order('display_name', {
+          ascending: true,
+        })
+        .limit(30);
 
-      setPeople([]);
-      setDares([]);
-    } finally {
-      setLoading(false);
+      // Remove blocked users from search results.
+      if (blockedUserIds.length > 0) {
+        profileQuery = profileQuery.not(
+          'id',
+          'in',
+          `(${blockedUserIds.join(',')})`,
+        );
+      }
+
+      const {
+        data,
+        error: searchError,
+      } = await profileQuery;
+
+      if (searchError) {
+        throw searchError;
+      }
+
+      setPeople((data ?? []) as PersonResult[]);
+    } else {
+      const {
+        data,
+        error: searchError,
+      } = await supabase
+        .from('dares')
+        .select(
+          'id,title,description,category,difficulty,xp_value',
+        )
+        .eq('status', 'active')
+        .or(
+          `title.ilike.${searchTerm},description.ilike.${searchTerm},category.ilike.${searchTerm}`,
+        )
+        .order('created_at', {
+          ascending: false,
+        })
+        .limit(30);
+
+      if (searchError) {
+        throw searchError;
+      }
+
+      setDares((data ?? []) as DareResult[]);
     }
-  };
+  } catch (err) {
+    console.error(
+      '[DareMe Search] Search failed:',
+      err,
+    );
+
+    setError(
+      err instanceof Error
+        ? err.message
+        : 'Search failed. Please try again.',
+    );
+
+    setPeople([]);
+    setDares([]);
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleTabChange = (tab: SearchTab) => {
     setActiveTab(tab);
