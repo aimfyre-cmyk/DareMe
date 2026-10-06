@@ -1,5 +1,7 @@
 import { router } from 'expo-router';
+
 import { useCallback, useEffect, useState } from 'react';
+
 import {
   ActivityIndicator,
   Image,
@@ -10,12 +12,17 @@ import {
 } from 'react-native';
 
 import { AppHeader } from '../components/AppHeader';
+
 import { Screen } from '../components/Screen';
+
 import {
   colors,
   fontSize,
   spacing,
 } from '../constants/theme';
+
+import { getR2MediaUrl } from '../features/onboarding/profileService';
+
 import { supabase } from '../lib/supabase';
 
 type RankingUser = {
@@ -65,32 +72,71 @@ export default function GlobalRankingScreen() {
         throw rankingError;
       }
 
-      setUsers(
-        ((data ?? []) as Array<{
-          rank: number | string;
-          user_id: string;
-          display_name: string;
-          username: string | null;
-          avatar_url: string | null;
-          xp: number | string;
-          completed_dares: number | string;
-        }>).map((item) => {
+      const rankingRows = (data ?? []) as Array<{
+        rank: number | string;
+        user_id: string;
+        display_name: string;
+        username: string | null;
+        avatar_url: string | null;
+        xp: number | string;
+        completed_dares: number | string;
+        is_dare_master: boolean;
+      }>;
+
+      const rankingUsers = await Promise.all(
+        rankingRows.map(async (item) => {
           const rank = Number(item.rank);
+
+          const originalAvatarUrl = item.avatar_url;
+
+          let resolvedAvatarUrl = originalAvatarUrl;
+
+          if (originalAvatarUrl) {
+            if (
+              originalAvatarUrl.startsWith('http://') ||
+              originalAvatarUrl.startsWith('https://')
+            ) {
+              resolvedAvatarUrl = originalAvatarUrl;
+            } else {
+              try {
+                const signedAvatarUrl =
+                  await getR2MediaUrl(originalAvatarUrl);
+
+                resolvedAvatarUrl =
+                  signedAvatarUrl || originalAvatarUrl;
+              } catch (avatarError) {
+                console.warn(
+                  '[Global Ranking] Avatar resolve failed:',
+                  item.user_id,
+                  avatarError,
+                );
+
+                resolvedAvatarUrl = originalAvatarUrl;
+              }
+            }
+          }
 
           return {
             rank,
             user_id: item.user_id,
             display_name: item.display_name,
             username: item.username,
-            avatar_url: item.avatar_url,
+            avatar_url: resolvedAvatarUrl,
             xp: Number(item.xp),
             completed_dares: Number(item.completed_dares),
-            is_dare_master: rank === 1,
+            is_dare_master: Boolean(
+              item.is_dare_master,
+            ),
           };
         }),
       );
+
+      setUsers(rankingUsers);
     } catch (err) {
-      console.error('[Global Ranking] Failed to load:', err);
+      console.error(
+        '[Global Ranking] Failed to load:',
+        err,
+      );
 
       setError(
         err instanceof Error
@@ -165,7 +211,9 @@ export default function GlobalRankingScreen() {
             <Text style={styles.myRankLevel}>
               {currentUser.completed_dares.toLocaleString()} completed
               {' '}
-              {currentUser.completed_dares === 1 ? 'Dare' : 'Dares'}
+              {currentUser.completed_dares === 1
+                ? 'Dare'
+                : 'Dares'}
             </Text>
           </View>
         </View>
@@ -235,15 +283,18 @@ export default function GlobalRankingScreen() {
                 }
                 style={[
                   styles.userCard,
-                  isCurrentUser && styles.currentUserCard,
-                  item.rank === 1 && styles.firstUserCard,
+                  isCurrentUser &&
+                    styles.currentUserCard,
+                  item.rank === 1 &&
+                    styles.firstUserCard,
                 ]}
               >
                 <View style={styles.rankColumn}>
                   <Text
                     style={[
                       styles.rank,
-                      item.rank === 1 && styles.firstRank,
+                      item.rank === 1 &&
+                        styles.firstRank,
                     ]}
                   >
                     #{item.rank}
@@ -276,7 +327,9 @@ export default function GlobalRankingScreen() {
 
                     {item.is_dare_master ? (
                       <View style={styles.masterBadge}>
-                        <Text style={styles.masterBadgeText}>
+                        <Text
+                          style={styles.masterBadgeText}
+                        >
                           👑 Dare Master
                         </Text>
                       </View>
@@ -295,7 +348,9 @@ export default function GlobalRankingScreen() {
                   <Text style={styles.completedText}>
                     {item.completed_dares.toLocaleString()} completed
                     {' '}
-                    {item.completed_dares === 1 ? 'Dare' : 'Dares'}
+                    {item.completed_dares === 1
+                      ? 'Dare'
+                      : 'Dares'}
                   </Text>
                 </View>
 

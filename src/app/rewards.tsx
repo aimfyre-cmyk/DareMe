@@ -1,12 +1,12 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    ActivityIndicator,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { supabase } from '../lib/supabase';
@@ -66,8 +66,11 @@ const rewardDefinitions: Reward[] = [
 export default function RewardsScreen() {
   const [completedDares, setCompletedDares] = useState(0);
   const [globalRank, setGlobalRank] = useState<number | null>(null);
+  const [isDareMaster, setIsDareMaster] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
   const [claimedRewardIds, setClaimedRewardIds] = useState<string[]>([]);
   const [claimingReward, setClaimingReward] = useState<string | null>(null);
   const [claimedRewards, setClaimedRewards] = useState<ClaimedReward[]>([]);
@@ -90,11 +93,20 @@ export default function RewardsScreen() {
         throw new Error('You must be logged in to view rewards.');
       }
 
+      /*
+       * Completed Dare count
+       *
+       * The final Dare flow can use VERIFIED or COMPLETED,
+       * so both completed states are counted.
+       */
       const { count, error: countError } = await supabase
         .from('dare_participants')
-        .select('id', { count: 'exact', head: true })
+        .select('id', {
+          count: 'exact',
+          head: true,
+        })
         .eq('user_id', user.id)
-        .eq('state', 'VERIFIED');
+        .in('state', ['VERIFIED', 'COMPLETED']);
 
       if (countError) {
         throw countError;
@@ -102,6 +114,9 @@ export default function RewardsScreen() {
 
       setCompletedDares(count ?? 0);
 
+      /*
+       * Claimed rewards
+       */
       const {
         data: rewards,
         error: rewardsError,
@@ -109,38 +124,63 @@ export default function RewardsScreen() {
         .from('user_rewards')
         .select('reward_id, reward_title, claimed_at')
         .eq('user_id', user.id)
-        .order('claimed_at', { ascending: false });
+        .order('claimed_at', {
+          ascending: false,
+        });
 
       if (rewardsError) {
         throw rewardsError;
       }
 
-      setClaimedRewards(rewards ?? []);
+      const loadedRewards =
+        (rewards ?? []) as ClaimedReward[];
+
+      setClaimedRewards(loadedRewards);
+
       setClaimedRewardIds(
-        (rewards ?? []).map((reward) => reward.reward_id),
+        loadedRewards.map(
+          (reward) => reward.reward_id,
+        ),
       );
 
+      /*
+       * Global rank
+       */
       const {
-        data: rankingData,
-        error: rankingError,
-      } = await supabase.rpc('get_global_ranking_all_time');
+        data: rankData,
+        error: rankError,
+      } = await supabase.rpc(
+        'get_global_user_rank',
+        {
+          p_user_id: user.id,
+        },
+      );
 
-      if (rankingError) {
-        throw rankingError;
+      if (rankError) {
+        throw rankError;
       }
 
-      const currentUserRanking = (rankingData ?? []).find(
-        (item: { user_id: string; rank: number | string }) =>
-          item.user_id === user.id,
-      );
+      const rankRow = Array.isArray(rankData)
+        ? rankData[0]
+        : rankData;
 
-      setGlobalRank(
-        currentUserRanking?.rank
-          ? Number(currentUserRanking.rank)
-          : null,
+      const rank =
+        rankRow?.rank !== undefined &&
+        rankRow?.rank !== null
+          ? Number(rankRow.rank)
+          : null;
+
+      setGlobalRank(rank);
+
+      setIsDareMaster(
+        Boolean(rankRow?.is_dare_master) ||
+          rank === 1,
       );
     } catch (err) {
-      console.error('[Rewards] Failed to load:', err);
+      console.error(
+        '[Rewards] Failed to load:',
+        err,
+      );
 
       setError(
         err instanceof Error
@@ -183,15 +223,24 @@ export default function RewardsScreen() {
       );
 
       if (claimedReward) {
+        const rewardRow =
+          claimedReward as ClaimedReward;
+
         setClaimedRewards((current) => [
-          claimedReward as ClaimedReward,
+          rewardRow,
           ...current.filter(
-            (item) => item.reward_id !== reward.id,
+            (item) =>
+              item.reward_id !== reward.id,
           ),
         ]);
+      } else {
+        await loadRewardsProgress();
       }
     } catch (err) {
-      console.error('[Rewards] Claim failed:', err);
+      console.error(
+        '[Rewards] Claim failed:',
+        err,
+      );
 
       setError(
         err instanceof Error
@@ -211,28 +260,45 @@ export default function RewardsScreen() {
       const {
         data: claimedReward,
         error: claimError,
-      } = await supabase.rpc('claim_dare_master_reward');
+      } = await supabase.rpc(
+        'claim_dare_master_reward',
+      );
 
       if (claimError) {
         throw claimError;
       }
 
-      setClaimedRewardIds((current) =>
-        current.includes('dare-master')
-          ? current
-          : [...current, 'dare-master'],
-      );
-
       if (claimedReward) {
+        const rewardRow =
+          claimedReward as ClaimedReward;
+
         setClaimedRewards((current) => [
-          claimedReward as ClaimedReward,
+          rewardRow,
           ...current.filter(
-            (item) => item.reward_id !== 'dare-master',
+            (item) =>
+              item.reward_id !==
+              rewardRow.reward_id,
           ),
         ]);
+
+        setClaimedRewardIds((current) =>
+          current.includes(
+            rewardRow.reward_id,
+          )
+            ? current
+            : [
+                ...current,
+                rewardRow.reward_id,
+              ],
+        );
+      } else {
+        await loadRewardsProgress();
       }
     } catch (err) {
-      console.error('[Rewards] Dare Master claim failed:', err);
+      console.error(
+        '[Rewards] Dare Master claim failed:',
+        err,
+      );
 
       setError(
         err instanceof Error
@@ -244,20 +310,32 @@ export default function RewardsScreen() {
     }
   };
 
+  const isDareMasterClaimed =
+    claimedRewards.some(
+      (reward) =>
+        reward.reward_id === 'dare-master' ||
+        reward.reward_title
+          .toLowerCase()
+          .includes('dare master'),
+    );
+
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.replace('/(tabs)' as any)}
+          onPress={() => router.back()}
           activeOpacity={0.8}
         >
           <Text style={styles.backText}>‹</Text>
         </TouchableOpacity>
 
         <View>
-          <Text style={styles.headerTitle}>Rewards</Text>
+          <Text style={styles.headerTitle}>
+            Rewards
+          </Text>
+
           <Text style={styles.headerSubtitle}>
             Earn badges and unlock rewards
           </Text>
@@ -271,366 +349,451 @@ export default function RewardsScreen() {
         {/* Summary */}
         <View style={styles.summaryCard}>
           <View>
-            <Text style={styles.summaryLabel}>YOUR REWARDS</Text>
+            <Text style={styles.summaryLabel}>
+              YOUR REWARDS
+            </Text>
 
             <Text style={styles.summaryTitle}>
               {loading
                 ? 'Loading progress...'
                 : `${completedDares} Dare${
-                    completedDares === 1 ? '' : 's'
+                    completedDares === 1
+                      ? ''
+                      : 's'
                   } completed`}
             </Text>
 
             <Text style={styles.summaryDescription}>
-              Complete milestones to unlock exclusive rewards and badges.
+              Complete milestones to unlock
+              exclusive rewards and badges.
             </Text>
           </View>
 
-          <Text style={styles.summaryIcon}>🏆</Text>
+          <Text style={styles.summaryIcon}>
+            🏆
+          </Text>
         </View>
 
         {/* Error */}
         {error ? (
           <View style={styles.errorCard}>
-            <Text style={styles.errorText}>{error}</Text>
+            <Text style={styles.errorText}>
+              {error}
+            </Text>
 
             <TouchableOpacity
               style={styles.retryButton}
               onPress={loadRewardsProgress}
               activeOpacity={0.8}
             >
-              <Text style={styles.retryText}>Try Again</Text>
+              <Text style={styles.retryText}>
+                Try Again
+              </Text>
             </TouchableOpacity>
           </View>
         ) : null}
 
         {/* Available Rewards */}
-        <Text style={styles.sectionTitle}>Available Rewards</Text>
+        <Text style={styles.sectionTitle}>
+          Available Rewards
+        </Text>
 
         {loading ? (
           <View style={styles.loadingCard}>
-            <ActivityIndicator size="small" color="#ffffff" />
+            <ActivityIndicator
+              size="small"
+              color="#ffffff"
+            />
+
             <Text style={styles.loadingText}>
               Loading reward progress...
             </Text>
           </View>
         ) : (
-          rewardDefinitions.map((reward) => {
-            const progress = Math.min(
-              completedDares / reward.target,
-              1,
-            );
+          <>
+            {rewardDefinitions.map((reward) => {
+              const progress = Math.min(
+                completedDares /
+                  reward.target,
+                1,
+              );
 
-            const unlocked = completedDares >= reward.target;
-            const claimed = claimedRewardIds.includes(reward.id);
+              const unlocked =
+                completedDares >=
+                reward.target;
 
-            return (
-              <View key={reward.id} style={styles.rewardCard}>
-                <View style={styles.rewardTop}>
-                  <View style={styles.iconBox}>
-                    <Text style={styles.rewardIcon}>
-                      {reward.icon}
-                    </Text>
+              const claimed =
+                claimedRewardIds.includes(
+                  reward.id,
+                );
+
+              return (
+                <View
+                  key={reward.id}
+                  style={styles.rewardCard}
+                >
+                  <View style={styles.rewardTop}>
+                    <View style={styles.iconBox}>
+                      <Text
+                        style={styles.rewardIcon}
+                      >
+                        {reward.icon}
+                      </Text>
+                    </View>
+
+                    <View style={styles.rewardInfo}>
+                      <Text
+                        style={styles.rewardTitle}
+                      >
+                        {reward.title}
+                      </Text>
+
+                      <Text
+                        style={
+                          styles.rewardDescription
+                        }
+                      >
+                        {reward.description}
+                      </Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        unlocked &&
+                          !claimed &&
+                          styles.unlockedBadge,
+                        claimed &&
+                          styles.claimedBadge,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusText,
+                          unlocked &&
+                            !claimed &&
+                            styles.unlockedStatusText,
+                          claimed &&
+                            styles.claimedStatusText,
+                        ]}
+                      >
+                        {claimed
+                          ? 'CLAIMED'
+                          : unlocked
+                            ? 'UNLOCKED'
+                            : 'LOCKED'}
+                      </Text>
+                    </View>
                   </View>
 
-                  <View style={styles.rewardInfo}>
-                    <Text style={styles.rewardTitle}>
-                      {reward.title}
+                  <View style={styles.progressRow}>
+                    <Text
+                      style={styles.progressText}
+                    >
+                      {Math.min(
+                        completedDares,
+                        reward.target,
+                      )}{' '}
+                      / {reward.target}
                     </Text>
 
-                    <Text style={styles.rewardDescription}>
-                      {reward.description}
+                    <Text
+                      style={
+                        styles.progressPercent
+                      }
+                    >
+                      {Math.round(
+                        progress * 100,
+                      )}
+                      %
                     </Text>
                   </View>
 
                   <View
+                    style={
+                      styles.progressBackground
+                    }
+                  >
+                    <View
+                      style={[
+                        styles.progressFill,
+                        unlocked &&
+                          styles.unlockedProgressFill,
+                        {
+                          width: `${progress * 100}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+
+                  <TouchableOpacity
                     style={[
-                      styles.statusBadge,
+                      styles.actionButton,
+                      !unlocked &&
+                        styles.lockedButton,
                       unlocked &&
                         !claimed &&
-                        styles.unlockedBadge,
-                      claimed && styles.claimedBadge,
+                        styles.unlockedButton,
+                      claimed &&
+                        styles.claimedButton,
                     ]}
+                    disabled={
+                      !unlocked ||
+                      claimed ||
+                      claimingReward ===
+                        reward.id
+                    }
+                    onPress={() =>
+                      claimReward(reward)
+                    }
+                    activeOpacity={0.8}
                   >
                     <Text
                       style={[
-                        styles.statusText,
+                        styles.actionButtonText,
+                        !unlocked &&
+                          styles.lockedButtonText,
                         unlocked &&
                           !claimed &&
-                          styles.unlockedStatusText,
-                        claimed && styles.claimedStatusText,
+                          styles.unlockedButtonText,
+                        claimed &&
+                          styles.claimedButtonText,
                       ]}
                     >
                       {claimed
-                        ? 'CLAIMED'
-                        : unlocked
-                          ? 'UNLOCKED'
-                          : 'LOCKED'}
+                        ? 'Claimed'
+                        : claimingReward ===
+                            reward.id
+                          ? 'Claiming...'
+                          : unlocked
+                            ? 'Claim Reward'
+                            : 'Locked'}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
+                </View>
+              );
+            })}
+
+            {/* Dare Master */}
+            <View style={styles.rewardCard}>
+              <View style={styles.rewardTop}>
+                <View style={styles.iconBox}>
+                  <Text style={styles.rewardIcon}>
+                    👑
+                  </Text>
                 </View>
 
-                <View style={styles.progressRow}>
-                  <Text style={styles.progressText}>
-                    {Math.min(completedDares, reward.target)} /{' '}
-                    {reward.target}
+                <View style={styles.rewardInfo}>
+                  <Text style={styles.rewardTitle}>
+                    Dare Master
                   </Text>
 
-                  <Text style={styles.progressPercent}>
-                    {Math.round(progress * 100)}%
+                  <Text
+                    style={
+                      styles.rewardDescription
+                    }
+                  >
+                    Reach #1 on the all-time global
+                    ranking.
                   </Text>
                 </View>
 
-                <View style={styles.progressBackground}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      unlocked && styles.unlockedProgressFill,
-                      { width: `${progress * 100}%` },
-                    ]}
-                  />
-                </View>
-
-                <TouchableOpacity
+                <View
                   style={[
-                    styles.actionButton,
-                    !unlocked && styles.lockedButton,
-                    unlocked &&
-                      !claimed &&
-                      styles.unlockedButton,
-                    claimed && styles.claimedButton,
+                    styles.statusBadge,
+                    isDareMaster &&
+                      styles.unlockedBadge,
+                    isDareMasterClaimed &&
+                      styles.claimedBadge,
                   ]}
-                  disabled={
-                    !unlocked ||
-                    claimed ||
-                    claimingReward === reward.id
-                  }
-                  onPress={() => claimReward(reward)}
-                  activeOpacity={0.8}
                 >
                   <Text
                     style={[
-                      styles.actionButtonText,
-                      !unlocked && styles.lockedButtonText,
-                      unlocked &&
-                        !claimed &&
-                        styles.unlockedButtonText,
-                      claimed && styles.claimedButtonText,
+                      styles.statusText,
+                      isDareMaster &&
+                        !isDareMasterClaimed &&
+                        styles.unlockedStatusText,
+                      isDareMasterClaimed &&
+                        styles.claimedStatusText,
                     ]}
                   >
-                    {claimed
-                      ? 'Claimed'
-                      : claimingReward === reward.id
-                        ? 'Claiming...'
-                        : unlocked
-                          ? 'Claim Reward'
-                          : 'Locked'}
+                    {isDareMasterClaimed
+                      ? 'CLAIMED'
+                      : isDareMaster
+                        ? 'UNLOCKED'
+                        : 'LOCKED'}
                   </Text>
-                </TouchableOpacity>
-              </View>
-            );
-          })
-        )}
-
-        {/* Special / Rank Rewards */}
-        <Text style={styles.sectionTitle}>
-          Special / Rank Rewards
-        </Text>
-
-        {loading ? (
-          <View style={styles.loadingCard}>
-            <ActivityIndicator size="small" color="#ffffff" />
-
-            <Text style={styles.loadingText}>
-              Loading rank reward...
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.rewardCard}>
-            <View style={styles.rewardTop}>
-              <View style={styles.iconBox}>
-                <Text style={styles.rewardIcon}>👑</Text>
+                </View>
               </View>
 
-              <View style={styles.rewardInfo}>
-                <Text style={styles.rewardTitle}>
-                  Dare Master
+              <View style={styles.progressRow}>
+                <Text
+                  style={styles.progressText}
+                >
+                  Your all-time rank
                 </Text>
 
-                <Text style={styles.rewardDescription}>
-                  Reach #1 on the all-time global ranking.
+                <Text
+                  style={styles.progressPercent}
+                >
+                  {globalRank
+                    ? `#${globalRank}`
+                    : '--'}
                 </Text>
               </View>
 
               <View
+                style={
+                  styles.progressBackground
+                }
+              >
+                <View
+                  style={[
+                    styles.progressFill,
+                    isDareMaster &&
+                      styles.unlockedProgressFill,
+                    {
+                      width: isDareMaster
+                        ? '100%'
+                        : '0%',
+                    },
+                  ]}
+                />
+              </View>
+
+              <TouchableOpacity
                 style={[
-                  styles.statusBadge,
-                  globalRank === 1 &&
-                    !claimedRewardIds.includes('dare-master') &&
-                    styles.unlockedBadge,
-                  claimedRewardIds.includes('dare-master') &&
-                    styles.claimedBadge,
+                  styles.actionButton,
+                  !isDareMaster &&
+                    styles.lockedButton,
+                  isDareMaster &&
+                    !isDareMasterClaimed &&
+                    styles.unlockedButton,
+                  isDareMasterClaimed &&
+                    styles.claimedButton,
                 ]}
+                disabled={
+                  !isDareMaster ||
+                  isDareMasterClaimed ||
+                  claimingReward ===
+                    'dare-master'
+                }
+                onPress={claimDareMaster}
+                activeOpacity={0.8}
               >
                 <Text
                   style={[
-                    styles.statusText,
-                    globalRank === 1 &&
-                      !claimedRewardIds.includes('dare-master') &&
-                      styles.unlockedStatusText,
-                    claimedRewardIds.includes('dare-master') &&
-                      styles.claimedStatusText,
+                    styles.actionButtonText,
+                    !isDareMaster &&
+                      styles.lockedButtonText,
+                    isDareMaster &&
+                      !isDareMasterClaimed &&
+                      styles.unlockedButtonText,
+                    isDareMasterClaimed &&
+                      styles.claimedButtonText,
                   ]}
                 >
-                  {claimedRewardIds.includes('dare-master')
-                    ? 'CLAIMED'
-                    : globalRank === 1
-                      ? 'UNLOCKED'
-                      : 'LOCKED'}
+                  {isDareMasterClaimed
+                    ? 'Claimed'
+                    : claimingReward ===
+                        'dare-master'
+                      ? 'Claiming...'
+                      : isDareMaster
+                        ? 'Claim Reward'
+                        : 'Locked'}
                 </Text>
-              </View>
+              </TouchableOpacity>
             </View>
-
-            <View style={styles.progressRow}>
-              <Text style={styles.progressText}>
-                Your all-time rank
-              </Text>
-
-              <Text style={styles.progressPercent}>
-                #{globalRank ?? '-'}
-              </Text>
-            </View>
-
-            <View style={styles.progressBackground}>
-              <View
-                style={[
-                  styles.progressFill,
-                  globalRank === 1 &&
-                    styles.unlockedProgressFill,
-                  {
-                    width: globalRank === 1 ? '100%' : '0%',
-                  },
-                ]}
-              />
-            </View>
-
-            <TouchableOpacity
-              style={[
-                styles.actionButton,
-                globalRank !== 1 && styles.lockedButton,
-                globalRank === 1 &&
-                  !claimedRewardIds.includes('dare-master') &&
-                  styles.unlockedButton,
-                claimedRewardIds.includes('dare-master') &&
-                  styles.claimedButton,
-              ]}
-              disabled={
-                globalRank !== 1 ||
-                claimedRewardIds.includes('dare-master') ||
-                claimingReward === 'dare-master'
-              }
-              onPress={claimDareMaster}
-              activeOpacity={0.8}
-            >
-              <Text
-                style={[
-                  styles.actionButtonText,
-                  globalRank !== 1 &&
-                    styles.lockedButtonText,
-                  globalRank === 1 &&
-                    !claimedRewardIds.includes('dare-master') &&
-                    styles.unlockedButtonText,
-                  claimedRewardIds.includes('dare-master') &&
-                    styles.claimedButtonText,
-                ]}
-              >
-                {claimedRewardIds.includes('dare-master')
-                  ? 'Claimed'
-                  : claimingReward === 'dare-master'
-                    ? 'Claiming...'
-                    : globalRank === 1
-                      ? 'Claim Reward'
-                      : 'Locked'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          </>
         )}
 
         {/* My Rewards */}
-        <Text style={styles.sectionTitle}>My Rewards</Text>
+        <Text style={styles.sectionTitle}>
+          My Rewards
+        </Text>
 
-        {claimedRewardIds.length === 0 ? (
+        {claimedRewards.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyIcon}>🎁</Text>
+            <Text style={styles.emptyIcon}>
+              🎁
+            </Text>
 
             <Text style={styles.emptyTitle}>
               No rewards claimed yet
             </Text>
 
-            <Text style={styles.emptyDescription}>
-              Your claimed rewards will appear here.
+            <Text
+              style={styles.emptyDescription}
+            >
+              Your claimed rewards will appear
+              here.
             </Text>
           </View>
         ) : (
           <View style={styles.claimedList}>
-            {[
-              ...rewardDefinitions
-                .filter((reward) =>
-                  claimedRewardIds.includes(reward.id),
-                )
-                .map((reward) => ({
-                  id: reward.id,
-                  icon: reward.icon,
-                  title: reward.title,
-                })),
-
-              ...(claimedRewardIds.includes('dare-master')
-                ? [
-                    {
-                      id: 'dare-master',
-                      icon: '👑',
-                      title: 'Dare Master',
-                    },
-                  ]
-                : []),
-            ].map((reward) => (
+            {claimedRewards.map((reward) => (
               <View
-                key={reward.id}
+                key={`${reward.reward_id}-${reward.claimed_at}`}
                 style={styles.claimedCard}
               >
-                <Text style={styles.claimedIcon}>
-                  {reward.icon}
+                <Text
+                  style={styles.claimedIcon}
+                >
+                  {reward.reward_title
+                    .toLowerCase()
+                    .includes('master')
+                    ? '👑'
+                    : '🎁'}
                 </Text>
 
-                <View style={styles.claimedInfo}>
-                  <Text style={styles.claimedTitle}>
-                    {reward.title}
+                <View
+                  style={styles.claimedInfo}
+                >
+                  <Text
+                    style={styles.claimedTitle}
+                  >
+                    {reward.reward_title}
                   </Text>
 
-                  <Text style={styles.claimedDescription}>
+                  <Text
+                    style={
+                      styles.claimedDescription
+                    }
+                  >
                     Reward claimed successfully
                   </Text>
                 </View>
 
-                <Text style={styles.claimedCheck}>✓</Text>
+                <Text
+                  style={styles.claimedCheck}
+                >
+                  ✓
+                </Text>
               </View>
             ))}
           </View>
         )}
 
         {/* Reward History */}
-        <Text style={styles.sectionTitle}>Reward History</Text>
+        <Text style={styles.sectionTitle}>
+          Reward History
+        </Text>
 
         {claimedRewards.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyIcon}>📜</Text>
+            <Text style={styles.emptyIcon}>
+              📜
+            </Text>
 
             <Text style={styles.emptyTitle}>
               No reward history
             </Text>
 
-            <Text style={styles.emptyDescription}>
-              Your reward activity will appear here.
+            <Text
+              style={styles.emptyDescription}
+            >
+              Your reward activity will appear
+              here.
             </Text>
           </View>
         ) : (
@@ -640,16 +803,32 @@ export default function RewardsScreen() {
                 key={`${reward.reward_id}-${reward.claimed_at}`}
                 style={styles.historyCard}
               >
-                <View style={styles.historyIconBox}>
-                  <Text style={styles.historyIcon}>🎁</Text>
+                <View
+                  style={styles.historyIconBox}
+                >
+                  <Text
+                    style={styles.historyIcon}
+                  >
+                    {reward.reward_title
+                      .toLowerCase()
+                      .includes('master')
+                      ? '👑'
+                      : '🎁'}
+                  </Text>
                 </View>
 
-                <View style={styles.historyInfo}>
-                  <Text style={styles.historyTitle}>
+                <View
+                  style={styles.historyInfo}
+                >
+                  <Text
+                    style={styles.historyTitle}
+                  >
                     {reward.reward_title}
                   </Text>
 
-                  <Text style={styles.historyDate}>
+                  <Text
+                    style={styles.historyDate}
+                  >
                     Claimed on{' '}
                     {new Date(
                       reward.claimed_at,
@@ -657,7 +836,11 @@ export default function RewardsScreen() {
                   </Text>
                 </View>
 
-                <Text style={styles.historyCheck}>✓</Text>
+                <Text
+                  style={styles.historyCheck}
+                >
+                  ✓
+                </Text>
               </View>
             ))}
           </View>
@@ -817,6 +1000,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
 
+  claimedBadge: {
+    backgroundColor: '#27272a',
+  },
+
   statusText: {
     color: '#a1a1aa',
     fontSize: 9,
@@ -825,6 +1012,10 @@ const styles = StyleSheet.create({
 
   unlockedStatusText: {
     color: '#09090b',
+  },
+
+  claimedStatusText: {
+    color: '#a1a1aa',
   },
 
   progressRow: {
@@ -878,16 +1069,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
   },
 
-  claimedBadge: {
-    backgroundColor: '#27272a',
-  },
-
-  claimedStatusText: {
-    color: '#a1a1aa',
-  },
-
   claimedButton: {
     backgroundColor: '#27272a',
+  },
+
+  actionButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  lockedButtonText: {
+    color: '#71717a',
+  },
+
+  unlockedButtonText: {
+    color: '#09090b',
   },
 
   claimedButtonText: {
@@ -985,19 +1181,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 20,
     fontWeight: '900',
-  },
-
-  actionButtonText: {
-    fontSize: 13,
-    fontWeight: '800',
-  },
-
-  lockedButtonText: {
-    color: '#71717a',
-  },
-
-  unlockedButtonText: {
-    color: '#09090b',
   },
 
   loadingCard: {

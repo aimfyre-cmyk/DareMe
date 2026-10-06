@@ -34,6 +34,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getR2MediaUrl } from '@/features/onboarding/profileService';
 
+import { DareShotPanel } from '../components/DareShotPanel';
 import { colors, fontSize, spacing } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 
@@ -52,6 +53,19 @@ type Message = {
   expires_at?: string | null;
   edited_at: string | null;
   deleted_at: string | null;
+};
+
+type IncomingPrivateShot = {
+  id: string;
+  sender_id: string;
+  receiver_id: string;
+  shot_type: 'voice' | 'video' | 'mystery';
+  status: 'sent' | 'accepted' | 'active' | 'completed' | 'rejected' | 'expired' | 'cancelled';
+  title: string | null;
+  challenge_text: string | null;
+  difficulty: string;
+  raise_level: number;
+  created_at: string;
 };
 
 type SharedPost = {
@@ -231,6 +245,10 @@ export default function ChatScreen() {
   const [blockLoading, setBlockLoading] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [sharedPosts, setSharedPosts] = useState<Record<string, SharedPost>>({});
+const [incomingShots, setIncomingShots] = useState<IncomingPrivateShot[]>([]);
+  const [shotActionLoading, setShotActionLoading] = useState<string | null>(null);
+  const [showDareShotPanel, setShowDareShotPanel] = useState(false);
+  const [activeDareShotId, setActiveDareShotId] = useState<string | null>(null);
 
   const listRef = useRef<FlatList<Message>>(null);
   const initialScrollDoneRef = useRef(false);
@@ -372,6 +390,31 @@ export default function ChatScreen() {
     }
   }, []);
 
+const loadIncomingShots = useCallback(
+  async (receiverId: string, senderId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('private_shots')
+        .select(
+          'id, sender_id, receiver_id, shot_type, status, title, challenge_text, difficulty, raise_level, created_at',
+        )
+        .eq('receiver_id', receiverId)
+        .eq('sender_id', senderId)
+        .eq('status', 'sent')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      setIncomingShots((data ?? []) as IncomingPrivateShot[]);
+    } catch (error) {
+      console.warn('[Chat] Incoming Shots:', error);
+      setIncomingShots([]);
+    }
+  },
+  [],
+);
+
+
   const loadInitial = useCallback(async () => {
     if (!conversationId) return;
     try {
@@ -455,14 +498,23 @@ export default function ChatScreen() {
       }
 
       await markConversationRead(user.id, conversationId);
+      if (otherUserId) {
+  void loadIncomingShots(user.id, otherUserId);
+}
     } catch (err: any) {
       console.error('[Chat] load:', err);
       setError(err?.message ?? 'Unable to load this conversation right now.');
     } finally {
       setLoading(false);
     }
-  }, [conversationId, loadSharedPosts, markConversationRead, otherUserId, resolveMediaForMessages]);
-
+}, [
+  conversationId,
+  loadIncomingShots,
+  loadSharedPosts,
+  markConversationRead,
+  otherUserId,
+  resolveMediaForMessages,
+]);
   const loadOlder = useCallback(async () => {
     if (!conversationId || loadingOlder || !hasMore || messages.length === 0) return;
     setLoadingOlder(true);
@@ -491,7 +543,7 @@ export default function ChatScreen() {
     } finally {
       setLoadingOlder(false);
     }
-  }, [conversationId, hasMore, loadSharedPosts, loadingOlder, messages, resolveMediaForMessages]);
+  }, [conversationId,loadIncomingShots,hasMore, loadSharedPosts, loadingOlder, messages, resolveMediaForMessages]);
 
   useEffect(() => {
     initialScrollDoneRef.current = false;
@@ -1539,6 +1591,30 @@ export default function ChatScreen() {
                   color={colors.primaryText}
                 />
               </Pressable>
+
+<Pressable
+  onPress={() => { setActiveDareShotId(incomingShots[0]?.id ?? null); setShowDareShotPanel(true); }}
+  style={styles.headerButton}
+  hitSlop={8}
+  accessibilityRole="button"
+  accessibilityLabel="Open DareShot"
+>
+  <View style={styles.dareShotHeaderIconWrap}>
+    <Ionicons
+      name="flash-outline"
+      size={21}
+      color={colors.primaryText}
+    />
+    {incomingShots.length > 0 ? (
+      <View style={styles.dareShotBadge}>
+        <Text style={styles.dareShotBadgeText}>
+          {incomingShots.length > 9 ? '9+' : incomingShots.length}
+        </Text>
+      </View>
+    ) : null}
+  </View>
+</Pressable>
+
               <Pressable
                 onPress={() => setShowMenu(true)}
                 style={styles.headerButton}
@@ -1559,7 +1635,34 @@ export default function ChatScreen() {
         ) : null}
 
         {loadingOlder ? <View style={styles.loadingOlder}><ActivityIndicator size="small" color={colors.accent} /></View> : null}
-
+{showDareShotPanel && otherUserId ? (
+          <Modal
+            visible={showDareShotPanel}
+            animationType="slide"
+            transparent
+            statusBarTranslucent
+            onRequestClose={() => {
+              setShowDareShotPanel(false);
+              setActiveDareShotId(null);
+            }}
+          >
+            <DareShotPanel
+              targetUserId={
+                activeDareShotId
+                  ? (incomingShots.find((shot) => shot.id === activeDareShotId)?.sender_id ?? otherUserId)
+                  : otherUserId
+              }
+              shotId={activeDareShotId}
+              onClose={() => {
+                setShowDareShotPanel(false);
+                setActiveDareShotId(null);
+                if (currentUserId && otherUserId) {
+                  void loadIncomingShots(currentUserId, otherUserId);
+                }
+              }}
+            />
+          </Modal>
+        ) : null}
         <FlatList
           ref={listRef}
           data={filteredMessages}
@@ -1990,9 +2093,9 @@ const styles = StyleSheet.create({
   header: { height: 56, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border },
   selectionHeader: { height: 56, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.surface },
   selectionHeaderTitle: { flex: 1, color: colors.primaryText, fontSize: fontSize.md, fontWeight: '800', marginLeft: spacing.xs },
-  headerButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerUser: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0 },
-  headerRight: { flexDirection: 'row', alignItems: 'center' },
+  headerButton: { width: 40, height: 40, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  headerUser: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0, flexShrink: 1 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 0 },
   headerAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center', overflow: 'visible' },
   headerAvatarImage: { width: '100%', height: '100%', borderRadius: 18 },
   headerAvatarText: { color: colors.primaryText, fontSize: 14, fontWeight: '800' },
@@ -2064,6 +2167,125 @@ const styles = StyleSheet.create({
     height: 180,
     backgroundColor: colors.background,
   },
+
+dareShotHeaderIconWrap: { position: 'relative', width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
+  dareShotBadge: { position: 'absolute', top: -4, right: -7, minWidth: 15, height: 15, paddingHorizontal: 3, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.background },
+  dareShotBadgeText: { color: '#0B0B0D', fontSize: 8, fontWeight: '900' },
+  dareShotPanelRoot: { flex: 1, backgroundColor: colors.background, paddingBottom: 18 },
+  dareShotPanelHeader: { minHeight: 62, paddingHorizontal: spacing.sm, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border },
+  dareShotPanelClose: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+  dareShotPanelTitleWrap: { flex: 1, minWidth: 0, alignItems: 'center' },
+  dareShotPanelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  dareShotPanelTitle: { color: colors.primaryText, fontSize: fontSize.lg, fontWeight: '900' },
+  dareShotPanelSubtitle: { marginTop: 2, color: colors.secondaryText, fontSize: fontSize.xs },
+  dareShotPanelHeaderSpacer: { width: 40, height: 40 },
+  dareShotStatsRow: { margin: spacing.md, paddingVertical: spacing.md, flexDirection: 'row', borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  dareShotStat: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  dareShotStatValue: { color: colors.primaryText, fontSize: fontSize.lg, fontWeight: '900' },
+  dareShotStatLabel: { marginTop: 2, color: colors.secondaryText, fontSize: fontSize.xs, fontWeight: '600' },
+  dareShotPendingSection: { paddingHorizontal: spacing.md },
+  dareShotSectionLabel: { marginBottom: spacing.sm, color: colors.secondaryText, fontSize: fontSize.xs, fontWeight: '900', letterSpacing: 0.7 },
+  dareShotPendingCard: { minHeight: 78, marginBottom: spacing.sm, padding: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  dareShotPendingIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
+  dareShotPendingInfo: { flex: 1, minWidth: 0 },
+  dareShotPendingTitle: { color: colors.primaryText, fontSize: fontSize.sm, fontWeight: '900' },
+  dareShotPendingText: { marginTop: 3, color: colors.secondaryText, fontSize: fontSize.xs, lineHeight: 17 },
+  dareShotOpenButton: { minWidth: 62, minHeight: 36, paddingHorizontal: spacing.sm, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent },
+  dareShotOpenButtonText: { color: '#0B0B0D', fontSize: fontSize.xs, fontWeight: '900' },
+  dareShotStartCard: { margin: spacing.md, marginTop: spacing.md, padding: spacing.lg, borderRadius: 20, alignItems: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  dareShotStartIcon: { width: 54, height: 54, marginBottom: spacing.sm, borderRadius: 27, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
+  dareShotStartTitle: { color: colors.primaryText, fontSize: fontSize.lg, fontWeight: '900', textAlign: 'center' },
+  dareShotStartText: { marginTop: spacing.xs, color: colors.secondaryText, fontSize: fontSize.sm, lineHeight: 20, textAlign: 'center' },
+  dareShotStartButton: { minHeight: 46, marginTop: spacing.md, paddingHorizontal: spacing.xl, borderRadius: 23, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.accent },
+  dareShotStartButtonText: { color: '#0B0B0D', fontSize: fontSize.sm, fontWeight: '900' },
+  dareShotPrivacyText: { marginHorizontal: spacing.xl, color: colors.secondaryText, fontSize: fontSize.xs, lineHeight: 17, textAlign: 'center' },
+  incomingShotWrap: {
+  paddingHorizontal: spacing.sm,
+  paddingTop: spacing.sm,
+  paddingBottom: spacing.xs,
+},
+
+incomingShotCard: {
+  borderWidth: 1,
+  borderColor: colors.border,
+  borderRadius: 16,
+  backgroundColor: colors.surface,
+  padding: spacing.md,
+},
+
+incomingShotTopRow: {
+  flexDirection: 'row',
+  alignItems: 'center',
+},
+
+incomingShotIcon: {
+  width: 42,
+  height: 42,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+incomingShotInfo: {
+  flex: 1,
+  marginLeft: spacing.sm,
+},
+
+incomingShotTitle: {
+  color: colors.primaryText,
+  fontSize: fontSize.md,
+  fontWeight: '800',
+},
+
+incomingShotType: {
+  marginTop: 2,
+  color: colors.primaryText,
+  fontSize: fontSize.sm,
+  fontWeight: '700',
+},
+
+incomingShotSubtitle: {
+  marginTop: 2,
+  color: colors.secondaryText,
+  fontSize: fontSize.xs,
+},
+
+incomingShotActions: {
+  flexDirection: 'row',
+  gap: spacing.sm,
+  marginTop: spacing.md,
+},
+
+incomingShotAcceptButton: {
+  flex: 1,
+  minHeight: 42,
+  borderRadius: 12,
+  backgroundColor: colors.accent,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+incomingShotAcceptText: {
+  color: '#0B0B0D',
+  fontSize: fontSize.sm,
+  fontWeight: '800',
+},
+
+incomingShotDismissButton: {
+  width: 90,
+  minHeight: 42,
+  borderRadius: 12,
+  borderWidth: 1,
+  borderColor: colors.border,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+incomingShotDismissText: {
+  color: colors.secondaryText,
+  fontSize: fontSize.sm,
+  fontWeight: '700',
+},
+
   sharedPostContent: {
     color: colors.primaryText,
     fontSize: fontSize.sm,

@@ -152,15 +152,28 @@ const { data: profileData, error: profileError } =
       let profileWithAvatar = profileData as Profile;
 
 if (profileWithAvatar.avatar_url) {
-  const signedAvatarUrl =
-    await getR2MediaUrl(
-      profileWithAvatar.avatar_url,
-    );
+  const originalAvatarUrl = profileWithAvatar.avatar_url;
 
-  profileWithAvatar = {
-    ...profileWithAvatar,
-    avatar_url: signedAvatarUrl,
-  };
+  // Already a complete URL → use it directly.
+  if (
+    originalAvatarUrl.startsWith('http://') ||
+    originalAvatarUrl.startsWith('https://')
+  ) {
+    profileWithAvatar = {
+      ...profileWithAvatar,
+      avatar_url: originalAvatarUrl,
+    };
+  } else {
+    // R2 key/path → try to generate signed URL.
+    const signedAvatarUrl =
+      await getR2MediaUrl(originalAvatarUrl);
+
+    profileWithAvatar = {
+      ...profileWithAvatar,
+      avatar_url:
+        signedAvatarUrl || originalAvatarUrl,
+    };
+  }
 }
 
 setProfile(profileWithAvatar);

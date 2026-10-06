@@ -1,7 +1,10 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
+
 import { useEffect, useState } from 'react';
+
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -33,6 +36,24 @@ type Dare = {
   time_limit_minutes: number | null;
 };
 
+type ParticipantState =
+  | 'SENT'
+  | 'ACCEPTED'
+  | 'IN_PROGRESS'
+  | 'SUBMITTED'
+  | 'VERIFIED'
+  | 'COMPLETED'
+  | 'REJECTED'
+  | 'DECLINED'
+  | 'EXPIRED'
+  | 'CANCELLED'
+  | null;
+
+type ExistingParticipant = {
+  id: string;
+  state: ParticipantState;
+};
+
 export default function DareDetailScreen() {
   const router = useRouter();
 
@@ -43,15 +64,33 @@ export default function DareDetailScreen() {
   const [dare, setDare] = useState<Dare | null>(null);
   const [loading, setLoading] = useState(true);
   const [takingDare, setTakingDare] = useState(false);
+  const [participantState, setParticipantState] =
+    useState<ParticipantState>(null);
+
+  const goToDares = () => {
+    router.replace('/(tabs)/dares');
+  };
+
+  const goHome = () => {
+    router.replace('/');
+  };
 
   useEffect(() => {
+    let mounted = true;
+
     const loadDare = async () => {
       if (!id) {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
         return;
       }
 
       try {
+        if (mounted) {
+          setLoading(true);
+        }
+
         const { data, error } = await supabase
           .from('dares')
           .select(
@@ -62,28 +101,119 @@ export default function DareDetailScreen() {
 
         if (error) {
           console.error('[DareDetail] Load error:', error);
-          setDare(null);
+
+          if (mounted) {
+            setDare(null);
+          }
+
           return;
         }
 
-        setDare(data as Dare);
+        if (mounted) {
+          setDare(data as Dare);
+        }
+
+        /*
+         * Load the current user's participant state as well.
+         *
+         * This does not change the existing Dare flow.
+         * It only lets the detail screen show the correct
+         * action when the user has already interacted with
+         * this Dare.
+         */
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!user || !mounted) {
+          return;
+        }
+
+        const { data: participant, error: participantError } =
+          await supabase
+            .from('dare_participants')
+            .select('id,state')
+            .eq('dare_id', id)
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+        if (participantError) {
+          /*
+           * Participant state is an enhancement only.
+           * A failure here must not make the Dare itself disappear.
+           */
+          console.warn(
+            '[DareDetail] Participant state load warning:',
+            participantError,
+          );
+          return;
+        }
+
+        if (mounted) {
+          setParticipantState(
+            (participant?.state as ParticipantState | undefined) ?? null,
+          );
+        }
       } catch (error) {
         console.error('[DareDetail] Load exception:', error);
-        setDare(null);
+
+        if (mounted) {
+          setDare(null);
+        }
       } finally {
-        setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     };
 
-    loadDare();
-  }, [id]);
+    void loadDare();
 
-  const goToDares = () => {
-    router.replace('/(tabs)/dares');
-  };
+    return () => {
+      mounted = false;
+    };
+  }, [id]);
 
   const handleTakeDare = async () => {
     if (!dare || takingDare) {
+      return;
+    }
+
+    /*
+     * If the Dare is already active/submitted/verified,
+     * don't create another participant or run the state
+     * machine again.
+     */
+    if (
+      participantState === 'IN_PROGRESS' ||
+      participantState === 'SUBMITTED' ||
+      participantState === 'VERIFIED'
+    ) {
+      goToDares();
+      return;
+    }
+
+    /*
+     * A completed Dare should not be restarted from this screen.
+     */
+    if (participantState === 'COMPLETED') {
+      Alert.alert(
+        'Dare completed',
+        'You have already completed this Dare.',
+      );
+      return;
+    }
+
+    if (
+      participantState === 'REJECTED' ||
+      participantState === 'DECLINED' ||
+      participantState === 'EXPIRED' ||
+      participantState === 'CANCELLED'
+    ) {
+      Alert.alert(
+        'Dare unavailable',
+        `This Dare is currently ${participantState.toLowerCase()}.`,
+      );
       return;
     }
 
@@ -98,7 +228,11 @@ export default function DareDetailScreen() {
       } = await supabase.auth.getUser();
 
       if (userError || !user) {
-        throw new Error('Please log in before taking a dare.');
+        Alert.alert(
+          'Login required',
+          'Please log in before taking a Dare.',
+        );
+        return;
       }
 
       const {
@@ -120,27 +254,64 @@ export default function DareDetailScreen() {
       if (existingParticipant) {
         participantId = existingParticipant.id;
 
+        const state =
+          existingParticipant.state as ParticipantState;
+
         console.log(
           '[DareDetail] Existing participant state:',
-          existingParticipant.state,
+          state,
         );
 
         if (
-          existingParticipant.state === 'IN_PROGRESS' ||
-          existingParticipant.state === 'SUBMITTED' ||
-          existingParticipant.state === 'VERIFIED'
+          state === 'IN_PROGRESS' ||
+          state === 'SUBMITTED' ||
+          state === 'VERIFIED'
         ) {
+          setParticipantState(state);
           goToDares();
           return;
         }
 
-        if (existingParticipant.state !== 'SENT') {
+        if (state === 'COMPLETED') {
+          setParticipantState(state);
+
+          Alert.alert(
+            'Dare completed',
+            'You have already completed this Dare.',
+          );
+
+          return;
+        }
+
+        if (
+          state === 'REJECTED' ||
+          state === 'DECLINED' ||
+          state === 'EXPIRED' ||
+          state === 'CANCELLED'
+        ) {
+          setParticipantState(state);
+
+          Alert.alert(
+            'Dare unavailable',
+            `This Dare is currently ${state.toLowerCase()}.`,
+          );
+
+          return;
+        }
+
+        if (state !== 'SENT' && state !== 'ACCEPTED') {
           throw new Error(
-            `This dare is currently ${existingParticipant.state}.`,
+            `This Dare is currently ${state}.`,
           );
         }
       }
 
+      /*
+       * Public/open Dare:
+       * create the participant if one does not already exist.
+       *
+       * Existing behavior is preserved.
+       */
       if (!existingParticipant) {
         const {
           data: participant,
@@ -152,13 +323,13 @@ export default function DareDetailScreen() {
             user_id: user.id,
             state: 'SENT',
           })
-          .select('id')
+          .select('id,state')
           .single();
 
         if (participantError || !participant) {
           throw (
             participantError ??
-            new Error('Could not create dare participant.')
+            new Error('Could not create Dare participant.')
           );
         }
 
@@ -176,6 +347,12 @@ export default function DareDetailScreen() {
         participantId,
       );
 
+      /*
+       * Existing state-machine flow.
+       *
+       * We deliberately keep transitionDare() as the single
+       * source of truth for Dare state transitions.
+       */
       const acceptResult = await transitionDare(
         participantId,
         'accept',
@@ -184,29 +361,95 @@ export default function DareDetailScreen() {
       if (!acceptResult.success) {
         throw new Error(
           acceptResult.error ||
-            'Could not accept the dare.',
+            'Could not accept the Dare.',
         );
       }
 
       if (acceptResult.state !== 'ACCEPTED') {
         throw new Error(
-          `Unexpected dare state: ${acceptResult.state}`,
+          `Unexpected Dare state: ${acceptResult.state}`,
         );
       }
+
+      setParticipantState('ACCEPTED');
 
       console.log(
         '[DareDetail] Dare accepted successfully.',
       );
 
+      /*
+       * Keep the existing product flow:
+       * after accepting, user goes to Active Dares.
+       */
       goToDares();
     } catch (error) {
       console.error(
-        '[DareDetail] Take dare error:',
+        '[DareDetail] Take Dare error:',
         error,
       );
 
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Could not take this Dare right now.';
+
+      Alert.alert(
+        'Could not take Dare',
+        message,
+      );
+    } finally {
       setTakingDare(false);
     }
+  };
+
+  const getActionLabel = () => {
+    if (takingDare) {
+      return '';
+    }
+
+    switch (participantState) {
+      case 'IN_PROGRESS':
+        return 'GO TO ACTIVE DARES';
+
+      case 'SUBMITTED':
+        return 'VIEW ACTIVE DARES';
+
+      case 'VERIFIED':
+        return 'VIEW ACTIVE DARES';
+
+      case 'COMPLETED':
+        return 'DARE COMPLETED';
+
+      case 'REJECTED':
+      case 'DECLINED':
+      case 'EXPIRED':
+      case 'CANCELLED':
+        return 'DARE UNAVAILABLE';
+
+      default:
+        return '⚡ TAKE THE DARE';
+    }
+  };
+
+  const isActionDisabled =
+    takingDare ||
+    participantState === 'COMPLETED' ||
+    participantState === 'REJECTED' ||
+    participantState === 'DECLINED' ||
+    participantState === 'EXPIRED' ||
+    participantState === 'CANCELLED';
+
+  const handleActionPress = () => {
+    if (
+      participantState === 'IN_PROGRESS' ||
+      participantState === 'SUBMITTED' ||
+      participantState === 'VERIFIED'
+    ) {
+      goToDares();
+      return;
+    }
+
+    void handleTakeDare();
   };
 
   if (loading) {
@@ -216,6 +459,10 @@ export default function DareDetailScreen() {
           size="large"
           color={colors.accent}
         />
+
+        <Text style={styles.loadingText}>
+          Loading Dare...
+        </Text>
       </View>
     );
   }
@@ -223,13 +470,23 @@ export default function DareDetailScreen() {
   if (!dare) {
     return (
       <View style={styles.center}>
+        <Text style={styles.errorTitle}>
+          Dare not found
+        </Text>
+
         <Text style={styles.errorText}>
-          Dare not found.
+          This Dare may have been removed, expired, or is no
+          longer available.
         </Text>
 
         <Pressable
-          onPress={() => router.replace('/')}
-          style={styles.backButton}
+          onPress={goHome}
+          style={({ pressed }) => [
+            styles.backButton,
+            pressed && styles.backButtonPressed,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel="Go Home"
         >
           <Text style={styles.backButtonText}>
             Go Home
@@ -243,8 +500,14 @@ export default function DareDetailScreen() {
     <View style={styles.screen}>
       <View style={styles.header}>
         <Pressable
-          onPress={() => router.replace('/')}
-          style={styles.back}
+          onPress={goHome}
+          style={({ pressed }) => [
+            styles.back,
+            pressed && styles.backPressed,
+          ]}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Text style={styles.backIcon}>‹</Text>
         </Pressable>
@@ -259,6 +522,7 @@ export default function DareDetailScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.card}>
           <View style={styles.tagRow}>
@@ -279,7 +543,7 @@ export default function DareDetailScreen() {
 
           <Text style={styles.description}>
             {dare.description ||
-              'Complete this dare and prove what you did.'}
+              'Complete this Dare and prove what you did.'}
           </Text>
 
           <View style={styles.divider} />
@@ -322,7 +586,10 @@ export default function DareDetailScreen() {
                 VISIBILITY
               </Text>
 
-              <Text style={styles.metaValue}>
+              <Text
+                style={styles.metaValue}
+                numberOfLines={1}
+              >
                 {dare.visibility === 'anyone'
                   ? 'Anyone'
                   : dare.visibility ?? 'Anyone'}
@@ -330,33 +597,84 @@ export default function DareDetailScreen() {
             </View>
           </View>
 
-          <View style={styles.challengeBox}>
-            <Text style={styles.challengeTitle}>
-              ⚡ Ready for the challenge?
-            </Text>
+          {participantState &&
+          participantState !== 'SENT' &&
+          participantState !== 'ACCEPTED' ? (
+            <View style={styles.statusBox}>
+              <Text style={styles.statusLabel}>
+                CURRENT STATUS
+              </Text>
 
-            <Text style={styles.challengeText}>
-              Accept this dare and it will appear in your Active Dares.
-            </Text>
-          </View>
+              <Text style={styles.statusValue}>
+                {participantState.replace('_', ' ')}
+              </Text>
+
+              {participantState === 'IN_PROGRESS' ||
+              participantState === 'SUBMITTED' ||
+              participantState === 'VERIFIED' ? (
+                <Text style={styles.statusText}>
+                  Your Dare is already active. Continue from
+                  Active Dares.
+                </Text>
+              ) : participantState === 'COMPLETED' ? (
+                <Text style={styles.statusText}>
+                  You have already completed this Dare.
+                </Text>
+              ) : (
+                <Text style={styles.statusText}>
+                  This Dare cannot currently be started again.
+                </Text>
+              )}
+            </View>
+          ) : (
+            <View style={styles.challengeBox}>
+              <Text style={styles.challengeTitle}>
+                ⚡ Ready for the challenge?
+              </Text>
+
+              <Text style={styles.challengeText}>
+                Accept this Dare and it will appear in your
+                Active Dares.
+              </Text>
+            </View>
+          )}
 
           <Pressable
-            onPress={handleTakeDare}
-            disabled={takingDare}
+            onPress={handleActionPress}
+            disabled={isActionDisabled}
             style={({ pressed }) => [
               styles.takeButton,
-              pressed && styles.takeButtonPressed,
-              takingDare && styles.takeButtonDisabled,
+              pressed && !isActionDisabled
+                ? styles.takeButtonPressed
+                : null,
+              isActionDisabled
+                ? styles.takeButtonDisabled
+                : null,
             ]}
+            accessibilityRole="button"
+            accessibilityLabel={getActionLabel()}
           >
             {takingDare ? (
               <ActivityIndicator color="#000000" />
             ) : (
-              <Text style={styles.takeButtonText}>
-                ⚡ TAKE THE DARE
+              <Text
+                style={[
+                  styles.takeButtonText,
+                  participantState === 'COMPLETED' &&
+                    styles.completedButtonText,
+                ]}
+              >
+                {getActionLabel()}
               </Text>
             )}
           </Pressable>
+
+          {participantState === 'COMPLETED' && (
+            <Text style={styles.bottomHint}>
+              Your completion, XP, ranking and future recognition
+              are handled by the Dare system.
+            </Text>
+          )}
         </View>
       </ScrollView>
     </View>
@@ -377,8 +695,15 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
   },
 
+  loadingText: {
+    marginTop: spacing.sm,
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.sm,
+  },
+
   header: {
-    height: 64,
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -388,10 +713,14 @@ const styles = StyleSheet.create({
   },
 
   back: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  backPressed: {
+    opacity: 0.6,
   },
 
   backIcon: {
@@ -407,12 +736,12 @@ const styles = StyleSheet.create({
   },
 
   headerSpacer: {
-    width: 40,
+    width: 44,
   },
 
   content: {
     padding: spacing.md,
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.xl * 2,
   },
 
   card: {
@@ -425,6 +754,7 @@ const styles = StyleSheet.create({
 
   tagRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing.sm,
     marginBottom: spacing.md,
   },
@@ -458,6 +788,7 @@ const styles = StyleSheet.create({
   metaItem: {
     width: '50%',
     marginBottom: spacing.md,
+    paddingRight: spacing.sm,
   },
 
   metaLabel: {
@@ -497,12 +828,44 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
+  statusBox: {
+    backgroundColor: colors.background,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+
+  statusLabel: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.xs,
+    marginBottom: spacing.xs,
+  },
+
+  statusValue: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.headingBold,
+    fontSize: fontSize.md,
+    marginBottom: spacing.xs,
+  },
+
+  statusText: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.sm,
+    lineHeight: 20,
+  },
+
   takeButton: {
-    minHeight: 52,
+    minHeight: 54,
     borderRadius: radius.md,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing.md,
   },
 
   takeButtonPressed: {
@@ -510,31 +873,62 @@ const styles = StyleSheet.create({
   },
 
   takeButtonDisabled: {
-    opacity: 0.6,
+    opacity: 0.55,
   },
 
   takeButtonText: {
     color: '#000000',
     fontFamily: fontFamily.bodyMedium,
     fontSize: fontSize.sm,
+    textAlign: 'center',
+  },
+
+  completedButtonText: {
+    opacity: 0.8,
+  },
+
+  bottomHint: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.xs,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+
+  errorTitle: {
+    color: colors.primaryText,
+    fontFamily: fontFamily.headingBold,
+    fontSize: fontSize.lg,
+    marginBottom: spacing.xs,
+    textAlign: 'center',
   },
 
   errorText: {
-    color: colors.primaryText,
-    fontFamily: fontFamily.bodyMedium,
-    fontSize: fontSize.md,
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.sm,
+    lineHeight: 20,
     marginBottom: spacing.md,
+    textAlign: 'center',
   },
 
   backButton: {
     backgroundColor: colors.accent,
     borderRadius: radius.md,
+    minHeight: 48,
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  backButtonPressed: {
+    opacity: 0.75,
   },
 
   backButtonText: {
     color: '#000000',
     fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.sm,
   },
 });
