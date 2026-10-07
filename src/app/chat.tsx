@@ -11,7 +11,7 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -34,9 +34,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getR2MediaUrl } from '@/features/onboarding/profileService';
 
-import { DareShotPanel } from '../components/DareShotPanel';
 import { colors, fontSize, spacing } from '../constants/theme';
 import { supabase } from '../lib/supabase';
+import PrivateShotScreen from './private-shot';
 
 type MessageType = 'text' | 'image' | 'video' | 'voice' | 'dare' | 'shared_post';
 
@@ -55,18 +55,7 @@ type Message = {
   deleted_at: string | null;
 };
 
-type IncomingPrivateShot = {
-  id: string;
-  sender_id: string;
-  receiver_id: string;
-  shot_type: 'voice' | 'video' | 'mystery';
-  status: 'sent' | 'accepted' | 'active' | 'completed' | 'rejected' | 'expired' | 'cancelled';
-  title: string | null;
-  challenge_text: string | null;
-  difficulty: string;
-  raise_level: number;
-  created_at: string;
-};
+
 
 type SharedPost = {
   id: string;
@@ -245,10 +234,10 @@ export default function ChatScreen() {
   const [blockLoading, setBlockLoading] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const [sharedPosts, setSharedPosts] = useState<Record<string, SharedPost>>({});
-const [incomingShots, setIncomingShots] = useState<IncomingPrivateShot[]>([]);
-  const [shotActionLoading, setShotActionLoading] = useState<string | null>(null);
-  const [showDareShotPanel, setShowDareShotPanel] = useState(false);
-  const [activeDareShotId, setActiveDareShotId] = useState<string | null>(null);
+  const [chatStreak, setChatStreak] = useState(0);
+  const [showPrivateShot, setShowPrivateShot] = useState(false);
+  const [pendingShotCount, setPendingShotCount] = useState(0);
+  const [pendingShotId, setPendingShotId] = useState<string | null>(null);
 
   const listRef = useRef<FlatList<Message>>(null);
   const initialScrollDoneRef = useRef(false);
@@ -259,6 +248,53 @@ const [incomingShots, setIncomingShots] = useState<IncomingPrivateShot[]>([]);
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(recorder);
+
+  const loadChatStreak = useCallback(async () => {
+    if (!conversationId || !otherUserId) {
+      setChatStreak(0);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.rpc(
+        'get_private_shot_streak',
+        {
+          p_conversation_id: conversationId,
+          p_other_user_id: otherUserId,
+        },
+      );
+
+      if (error) throw error;
+
+      const row = Array.isArray(data) ? data[0] : data;
+      setChatStreak(Number(row?.streak ?? 0));
+    } catch (error) {
+      console.warn('[Chat] Private Shot streak:', error);
+      setChatStreak(0);
+    }
+  }, [conversationId, otherUserId]);
+
+  const loadPendingShot = useCallback(async () => {
+    if (!conversationId || !currentUserId) {
+      setPendingShotCount(0);
+      setPendingShotId(null);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('private_shots')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('receiver_id', currentUserId)
+      .eq('status', 'sent')
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.warn('[Chat] Pending Private Shots:', error);
+      return;
+    }
+    const rows = (data ?? []) as Array<{ id: string }>;
+    setPendingShotCount(rows.length);
+    setPendingShotId(rows[0]?.id ?? null);
+  }, [conversationId, currentUserId]);
 
   const markConversationRead = useCallback(async (userId: string, targetConversationId: string) => {
     const { error: readError } = await supabase.from('direct_message_reads').upsert(
@@ -390,31 +426,6 @@ const [incomingShots, setIncomingShots] = useState<IncomingPrivateShot[]>([]);
     }
   }, []);
 
-const loadIncomingShots = useCallback(
-  async (receiverId: string, senderId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('private_shots')
-        .select(
-          'id, sender_id, receiver_id, shot_type, status, title, challenge_text, difficulty, raise_level, created_at',
-        )
-        .eq('receiver_id', receiverId)
-        .eq('sender_id', senderId)
-        .eq('status', 'sent')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      setIncomingShots((data ?? []) as IncomingPrivateShot[]);
-    } catch (error) {
-      console.warn('[Chat] Incoming Shots:', error);
-      setIncomingShots([]);
-    }
-  },
-  [],
-);
-
-
   const loadInitial = useCallback(async () => {
     if (!conversationId) return;
     try {
@@ -426,6 +437,8 @@ const loadIncomingShots = useCallback(
       currentUserRef.current = user.id;
       setCurrentUserId(user.id);
       setSharedPosts({});
+      void loadChatStreak();
+      void loadPendingShot();
 
       const { data: memberCheck, error: memberError } = await supabase
         .from('direct_conversation_members')
@@ -498,9 +511,6 @@ const loadIncomingShots = useCallback(
       }
 
       await markConversationRead(user.id, conversationId);
-      if (otherUserId) {
-  void loadIncomingShots(user.id, otherUserId);
-}
     } catch (err: any) {
       console.error('[Chat] load:', err);
       setError(err?.message ?? 'Unable to load this conversation right now.');
@@ -509,7 +519,7 @@ const loadIncomingShots = useCallback(
     }
 }, [
   conversationId,
-  loadIncomingShots,
+  loadChatStreak,
   loadSharedPosts,
   markConversationRead,
   otherUserId,
@@ -543,12 +553,37 @@ const loadIncomingShots = useCallback(
     } finally {
       setLoadingOlder(false);
     }
-  }, [conversationId,loadIncomingShots,hasMore, loadSharedPosts, loadingOlder, messages, resolveMediaForMessages]);
+  }, [conversationId, hasMore, loadSharedPosts, loadingOlder, messages, resolveMediaForMessages]);
 
   useEffect(() => {
     initialScrollDoneRef.current = false;
     void loadInitial();
   }, [loadInitial]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadChatStreak();
+      void loadPendingShot();
+    }, [loadChatStreak, loadPendingShot]),
+  );
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const channel = supabase
+      .channel(`private-shot-chat-${conversationId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'private_shots', filter: `conversation_id=eq.${conversationId}` },
+        () => {
+          void loadPendingShot();
+          void loadChatStreak();
+        },
+      )
+      .subscribe();
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [conversationId, loadPendingShot, loadChatStreak]);
 
   const scrollToLatestMessage = useCallback(() => {
     if (messages.length === 0) return;
@@ -612,6 +647,18 @@ const loadIncomingShots = useCallback(
         const old = payload.old as Reaction;
         setMessageReactions((current) => current.filter((item) => !(item.message_id === old.message_id && item.user_id === old.user_id)));
       })
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'private_shots',
+          filter: `conversation_id=eq.${conversationId}`,
+        },
+        () => {
+          void loadChatStreak();
+        },
+      )
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'direct_message_reads', filter: `conversation_id=eq.${conversationId}` }, (payload) => {
         const row = payload.new as { user_id: string; last_read_at: string };
         if (row.user_id === otherUserId) setOtherUserLastReadAt(row.last_read_at);
@@ -622,7 +669,7 @@ const loadIncomingShots = useCallback(
       })
       .subscribe();
     return () => { void supabase.removeChannel(channel); };
-  }, [conversationId, markConversationRead, otherUserId, resolveMediaForMessages]);
+  }, [conversationId, loadChatStreak, markConversationRead, otherUserId, resolveMediaForMessages]);
 
   useEffect(() => {
     if (!otherUserId || !currentUserId) return;
@@ -1539,9 +1586,23 @@ const loadIncomingShots = useCallback(
                 style={styles.headerNameBlock}
                 onPress={openSharedMedia}
               >
-                <Text style={styles.headerTitle} numberOfLines={1}>
-                  {title}
-                </Text>
+                <View style={styles.headerTitleRow}>
+                  <Text style={styles.headerTitle} numberOfLines={1}>
+                    {title}
+                  </Text>
+                  {chatStreak > 0 ? (
+                    <View style={styles.headerStreak}>
+                      <Ionicons
+                        name="flame"
+                        size={13}
+                        color={colors.primaryText}
+                      />
+                      <Text style={styles.headerStreakText}>
+                        {chatStreak}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={styles.headerUsername}>
                   {online
                     ? 'Active now'
@@ -1593,26 +1654,31 @@ const loadIncomingShots = useCallback(
               </Pressable>
 
 <Pressable
-  onPress={() => { setActiveDareShotId(incomingShots[0]?.id ?? null); setShowDareShotPanel(true); }}
+  onPress={() => {
+    if (!otherUserId) {
+      Alert.alert('Unable to start Shot', 'User information is missing.');
+      return;
+    }
+
+    setShowPrivateShot(true);
+  }}
   style={styles.headerButton}
   hitSlop={8}
   accessibilityRole="button"
-  accessibilityLabel="Open DareShot"
+  accessibilityLabel="Start Private Shot"
 >
-  <View style={styles.dareShotHeaderIconWrap}>
-    <Ionicons
-      name="flash-outline"
-      size={21}
-      color={colors.primaryText}
-    />
-    {incomingShots.length > 0 ? (
-      <View style={styles.dareShotBadge}>
-        <Text style={styles.dareShotBadgeText}>
-          {incomingShots.length > 9 ? '9+' : incomingShots.length}
-        </Text>
-      </View>
-    ) : null}
-  </View>
+  <Ionicons
+    name="flash-outline"
+    size={21}
+    color={colors.primaryText}
+  />
+  {pendingShotCount > 0 ? (
+    <View style={styles.flashBadge}>
+      <Text style={styles.flashBadgeText}>
+        {pendingShotCount > 9 ? '9+' : pendingShotCount}
+      </Text>
+    </View>
+  ) : null}
 </Pressable>
 
               <Pressable
@@ -1635,34 +1701,7 @@ const loadIncomingShots = useCallback(
         ) : null}
 
         {loadingOlder ? <View style={styles.loadingOlder}><ActivityIndicator size="small" color={colors.accent} /></View> : null}
-{showDareShotPanel && otherUserId ? (
-          <Modal
-            visible={showDareShotPanel}
-            animationType="slide"
-            transparent
-            statusBarTranslucent
-            onRequestClose={() => {
-              setShowDareShotPanel(false);
-              setActiveDareShotId(null);
-            }}
-          >
-            <DareShotPanel
-              targetUserId={
-                activeDareShotId
-                  ? (incomingShots.find((shot) => shot.id === activeDareShotId)?.sender_id ?? otherUserId)
-                  : otherUserId
-              }
-              shotId={activeDareShotId}
-              onClose={() => {
-                setShowDareShotPanel(false);
-                setActiveDareShotId(null);
-                if (currentUserId && otherUserId) {
-                  void loadIncomingShots(currentUserId, otherUserId);
-                }
-              }}
-            />
-          </Modal>
-        ) : null}
+
         <FlatList
           ref={listRef}
           data={filteredMessages}
@@ -2031,6 +2070,31 @@ const loadIncomingShots = useCallback(
       </Modal>
 
       <Modal
+        visible={showPrivateShot}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => {
+          setShowPrivateShot(false);
+          void loadPendingShot();
+          void loadChatStreak();
+        }}
+      >
+        {otherUserId ? (
+          <PrivateShotScreen
+            embedded
+            userId={otherUserId}
+            conversationId={conversationId}
+            shotId={pendingShotId ?? undefined}
+            onClose={() => {
+              setShowPrivateShot(false);
+              void loadPendingShot();
+              void loadChatStreak();
+            }}
+          />
+        ) : null}
+      </Modal>
+
+      <Modal
         visible={selectedMedia !== null}
         transparent
         animationType="fade"
@@ -2093,6 +2157,24 @@ const styles = StyleSheet.create({
   header: { height: 56, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border },
   selectionHeader: { height: 56, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: colors.surface },
   selectionHeaderTitle: { flex: 1, color: colors.primaryText, fontSize: fontSize.md, fontWeight: '800', marginLeft: spacing.xs },
+  flashBadge: {
+    position: 'absolute',
+    top: 1,
+    right: 1,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    borderRadius: 8,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  flashBadgeText: {
+    color: '#0B0B0D',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+
   headerButton: { width: 40, height: 40, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
   headerUser: { flex: 1, flexDirection: 'row', alignItems: 'center', minWidth: 0, flexShrink: 1 },
   headerRight: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 0 },
@@ -2102,6 +2184,9 @@ const styles = StyleSheet.create({
   headerOnlineDot: { position: 'absolute', right: -1, bottom: -1, width: 12, height: 12, borderRadius: 6, backgroundColor: '#35d07f', borderWidth: 2, borderColor: colors.background },
   headerNameBlock: { flex: 1, marginLeft: spacing.sm, minWidth: 0 },
   headerTitle: { color: colors.primaryText, fontSize: fontSize.md, fontWeight: '800' },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', minWidth: 0, flexShrink: 1, gap: 6 },
+  headerStreak: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 8, backgroundColor: colors.surfaceElevated, borderWidth: 1, borderColor: colors.border, flexShrink: 0 },
+  headerStreakText: { color: colors.primaryText, fontSize: 10, fontWeight: '900' },
   headerUsername: { marginTop: 1, color: colors.secondaryText, fontSize: fontSize.xs },
   searchBar: { height: 44, margin: spacing.sm, marginBottom: spacing.xs, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.md, gap: spacing.sm },
   searchInput: { flex: 1, color: colors.primaryText, fontSize: fontSize.sm, paddingVertical: 0 },
@@ -2167,124 +2252,6 @@ const styles = StyleSheet.create({
     height: 180,
     backgroundColor: colors.background,
   },
-
-dareShotHeaderIconWrap: { position: 'relative', width: 26, height: 26, alignItems: 'center', justifyContent: 'center' },
-  dareShotBadge: { position: 'absolute', top: -4, right: -7, minWidth: 15, height: 15, paddingHorizontal: 3, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent, borderWidth: 1, borderColor: colors.background },
-  dareShotBadgeText: { color: '#0B0B0D', fontSize: 8, fontWeight: '900' },
-  dareShotPanelRoot: { flex: 1, backgroundColor: colors.background, paddingBottom: 18 },
-  dareShotPanelHeader: { minHeight: 62, paddingHorizontal: spacing.sm, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border },
-  dareShotPanelClose: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  dareShotPanelTitleWrap: { flex: 1, minWidth: 0, alignItems: 'center' },
-  dareShotPanelTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  dareShotPanelTitle: { color: colors.primaryText, fontSize: fontSize.lg, fontWeight: '900' },
-  dareShotPanelSubtitle: { marginTop: 2, color: colors.secondaryText, fontSize: fontSize.xs },
-  dareShotPanelHeaderSpacer: { width: 40, height: 40 },
-  dareShotStatsRow: { margin: spacing.md, paddingVertical: spacing.md, flexDirection: 'row', borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  dareShotStat: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  dareShotStatValue: { color: colors.primaryText, fontSize: fontSize.lg, fontWeight: '900' },
-  dareShotStatLabel: { marginTop: 2, color: colors.secondaryText, fontSize: fontSize.xs, fontWeight: '600' },
-  dareShotPendingSection: { paddingHorizontal: spacing.md },
-  dareShotSectionLabel: { marginBottom: spacing.sm, color: colors.secondaryText, fontSize: fontSize.xs, fontWeight: '900', letterSpacing: 0.7 },
-  dareShotPendingCard: { minHeight: 78, marginBottom: spacing.sm, padding: spacing.sm, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderRadius: 16, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  dareShotPendingIcon: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
-  dareShotPendingInfo: { flex: 1, minWidth: 0 },
-  dareShotPendingTitle: { color: colors.primaryText, fontSize: fontSize.sm, fontWeight: '900' },
-  dareShotPendingText: { marginTop: 3, color: colors.secondaryText, fontSize: fontSize.xs, lineHeight: 17 },
-  dareShotOpenButton: { minWidth: 62, minHeight: 36, paddingHorizontal: spacing.sm, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent },
-  dareShotOpenButtonText: { color: '#0B0B0D', fontSize: fontSize.xs, fontWeight: '900' },
-  dareShotStartCard: { margin: spacing.md, marginTop: spacing.md, padding: spacing.lg, borderRadius: 20, alignItems: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  dareShotStartIcon: { width: 54, height: 54, marginBottom: spacing.sm, borderRadius: 27, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
-  dareShotStartTitle: { color: colors.primaryText, fontSize: fontSize.lg, fontWeight: '900', textAlign: 'center' },
-  dareShotStartText: { marginTop: spacing.xs, color: colors.secondaryText, fontSize: fontSize.sm, lineHeight: 20, textAlign: 'center' },
-  dareShotStartButton: { minHeight: 46, marginTop: spacing.md, paddingHorizontal: spacing.xl, borderRadius: 23, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.accent },
-  dareShotStartButtonText: { color: '#0B0B0D', fontSize: fontSize.sm, fontWeight: '900' },
-  dareShotPrivacyText: { marginHorizontal: spacing.xl, color: colors.secondaryText, fontSize: fontSize.xs, lineHeight: 17, textAlign: 'center' },
-  incomingShotWrap: {
-  paddingHorizontal: spacing.sm,
-  paddingTop: spacing.sm,
-  paddingBottom: spacing.xs,
-},
-
-incomingShotCard: {
-  borderWidth: 1,
-  borderColor: colors.border,
-  borderRadius: 16,
-  backgroundColor: colors.surface,
-  padding: spacing.md,
-},
-
-incomingShotTopRow: {
-  flexDirection: 'row',
-  alignItems: 'center',
-},
-
-incomingShotIcon: {
-  width: 42,
-  height: 42,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
-
-incomingShotInfo: {
-  flex: 1,
-  marginLeft: spacing.sm,
-},
-
-incomingShotTitle: {
-  color: colors.primaryText,
-  fontSize: fontSize.md,
-  fontWeight: '800',
-},
-
-incomingShotType: {
-  marginTop: 2,
-  color: colors.primaryText,
-  fontSize: fontSize.sm,
-  fontWeight: '700',
-},
-
-incomingShotSubtitle: {
-  marginTop: 2,
-  color: colors.secondaryText,
-  fontSize: fontSize.xs,
-},
-
-incomingShotActions: {
-  flexDirection: 'row',
-  gap: spacing.sm,
-  marginTop: spacing.md,
-},
-
-incomingShotAcceptButton: {
-  flex: 1,
-  minHeight: 42,
-  borderRadius: 12,
-  backgroundColor: colors.accent,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
-
-incomingShotAcceptText: {
-  color: '#0B0B0D',
-  fontSize: fontSize.sm,
-  fontWeight: '800',
-},
-
-incomingShotDismissButton: {
-  width: 90,
-  minHeight: 42,
-  borderRadius: 12,
-  borderWidth: 1,
-  borderColor: colors.border,
-  alignItems: 'center',
-  justifyContent: 'center',
-},
-
-incomingShotDismissText: {
-  color: colors.secondaryText,
-  fontSize: fontSize.sm,
-  fontWeight: '700',
-},
 
   sharedPostContent: {
     color: colors.primaryText,

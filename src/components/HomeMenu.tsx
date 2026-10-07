@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import {
   Modal,
   Pressable,
@@ -27,6 +28,34 @@ export function HomeMenu({
   onClose,
   items,
 }: HomeMenuProps) {
+  /**
+   * Dashboard is intentionally added here so it always
+   * stays at the TOP of the Home menu.
+   *
+   * Existing menu items and their functions remain untouched.
+   *
+   * Duplicate protection:
+   * If Dashboard is already supplied from Home, we do not
+   * show it twice.
+   */
+  const hasDashboard = items.some(
+    (item) => item.title === 'Dashboard',
+  );
+
+  const menuItems: MenuItem[] = hasDashboard
+    ? items
+    : [
+        {
+          title: 'Dashboard',
+          subtitle: 'Your DareShot performance',
+          icon: '📊',
+          onPress: () => {
+            router.push('/dashboard');
+          },
+        },
+        ...items,
+      ];
+
   return (
     <Modal
       visible={visible}
@@ -44,6 +73,7 @@ export function HomeMenu({
           <View style={styles.header}>
             <View>
               <Text style={styles.title}>DareShot</Text>
+
               <Text style={styles.subtitle}>
                 Your DareShot menu
               </Text>
@@ -62,7 +92,7 @@ export function HomeMenu({
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.list}
           >
-            {items.map((item) => (
+            {menuItems.map((item) => (
               <Pressable
                 key={item.title}
                 onPress={() => {

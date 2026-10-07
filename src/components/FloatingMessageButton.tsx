@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors } from '../constants/theme';
@@ -8,6 +8,7 @@ import { supabase } from '../lib/supabase';
 
 export function FloatingMessageButton() {
   const [unreadCount, setUnreadCount] = useState(0);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const loadUnreadCount = useCallback(async () => {
     try {
@@ -28,9 +29,7 @@ export function FloatingMessageButton() {
           .eq('recipient_id', user.id)
           .eq('status', 'pending');
 
-      if (requestError) {
-        throw requestError;
-      }
+      if (requestError) throw requestError;
 
       // 2) Conversations where the current user is a member
       const { data: memberRows, error: memberError } =
@@ -40,15 +39,11 @@ export function FloatingMessageButton() {
           .eq('user_id', user.id)
           .is('deleted_at', null);
 
-      if (memberError) {
-        throw memberError;
-      }
+      if (memberError) throw memberError;
 
       const conversationIds = [
         ...new Set(
-          (memberRows ?? []).map((row) =>
-            String(row.conversation_id),
-          ),
+          (memberRows ?? []).map((row) => String(row.conversation_id)),
         ),
       ];
 
@@ -58,16 +53,12 @@ export function FloatingMessageButton() {
         const { data: messages, error: messageError } =
           await supabase
             .from('direct_messages')
-            .select(
-              'conversation_id, sender_id, created_at',
-            )
+            .select('conversation_id, sender_id, created_at')
             .in('conversation_id', conversationIds)
             .neq('sender_id', user.id)
             .is('deleted_at', null);
 
-        if (messageError) {
-          throw messageError;
-        }
+        if (messageError) throw messageError;
 
         const { data: readRows, error: readError } =
           await supabase
@@ -76,48 +67,46 @@ export function FloatingMessageButton() {
             .eq('user_id', user.id)
             .in('conversation_id', conversationIds);
 
-        if (readError) {
-          throw readError;
-        }
+        if (readError) throw readError;
 
         const readAtByConversation = new Map<string, number>();
 
         for (const row of readRows ?? []) {
           readAtByConversation.set(
             String(row.conversation_id),
-            row.last_read_at
-              ? new Date(row.last_read_at).getTime()
-              : 0,
+            row.last_read_at ? new Date(row.last_read_at).getTime() : 0,
           );
         }
 
         for (const message of messages ?? []) {
           const lastReadAt =
-            readAtByConversation.get(
-              String(message.conversation_id),
-            ) ?? 0;
+            readAtByConversation.get(String(message.conversation_id)) ?? 0;
 
-          const messageTime = new Date(
-            message.created_at,
-          ).getTime();
+          const messageTime = new Date(message.created_at).getTime();
 
-          if (messageTime > lastReadAt) {
-            unreadMessages += 1;
-          }
+          if (messageTime > lastReadAt) unreadMessages += 1;
         }
       }
+
+      // 3) Pending Private Shots are also inbox notifications.
+      const { count: pendingShotCount, error: shotError } = await supabase
+        .from('private_shots')
+        .select('id', { count: 'exact', head: true })
+        .eq('receiver_id', user.id)
+        .eq('status', 'sent');
+
+      if (shotError) throw shotError;
 
       setUnreadCount(
         Math.min(
           99,
-          Number(requestCount ?? 0) + unreadMessages,
+          Number(requestCount ?? 0) +
+            unreadMessages +
+            Number(pendingShotCount ?? 0),
         ),
       );
     } catch (error) {
-      console.error(
-        '[FloatingMessageButton] Unread count error:',
-        error,
-      );
+      console.error('[FloatingMessageButton] Unread count error:', error);
     }
   }, []);
 
@@ -127,11 +116,79 @@ export function FloatingMessageButton() {
     }, [loadUnreadCount]),
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      const setupRealtime = async () => {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!active || !user) return;
+
+        if (channelRef.current) {
+          void supabase.removeChannel(channelRef.current);
+          channelRef.current = null;
+        }
+
+        const channel = supabase
+          .channel(`floating-message-button:${user.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'private_shots',
+              filter: `receiver_id=eq.${user.id}`,
+            },
+            () => {
+              void loadUnreadCount();
+            },
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'direct_messages',
+            },
+            (payload) => {
+              const message = payload.new as { sender_id?: string };
+              if (message.sender_id !== user.id) void loadUnreadCount();
+            },
+          )
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'message_requests',
+              filter: `recipient_id=eq.${user.id}`,
+            },
+            () => {
+              void loadUnreadCount();
+            },
+          )
+          .subscribe();
+
+        channelRef.current = channel;
+      };
+
+      void setupRealtime();
+
+      return () => {
+        active = false;
+        if (channelRef.current) {
+          void supabase.removeChannel(channelRef.current);
+          channelRef.current = null;
+        }
+      };
+    }, [loadUnreadCount]),
+  );
+
   return (
-    <View
-      pointerEvents="box-none"
-      style={styles.container}
-    >
+    <View pointerEvents="box-none" style={styles.container}>
       <Pressable
         onPress={() => router.push('/messages')}
         style={({ pressed }) => [
@@ -172,7 +229,6 @@ const styles = StyleSheet.create({
     zIndex: 100,
     elevation: 100,
   },
-
   button: {
     width: 54,
     height: 54,
@@ -183,19 +239,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.22)',
     shadowColor: '#000000',
-    shadowOffset: {
-      width: 0,
-      height: 5,
-    },
+    shadowOffset: { width: 0, height: 5 },
     shadowOpacity: 0.28,
     shadowRadius: 10,
   },
-
   buttonPressed: {
     opacity: 0.72,
     transform: [{ scale: 0.95 }],
   },
-
   badge: {
     position: 'absolute',
     top: -6,
@@ -210,7 +261,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   badgeText: {
     color: 'rgba(255, 255, 255, 0.96)',
     fontSize: 10,

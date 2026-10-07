@@ -29,15 +29,68 @@ import { supabase } from '../../lib/supabase';
 const difficulties = ['Easy', 'Medium', 'Hard'] as const;
 
 const visibilities = [
-  'Anyone',
   'Followers',
-  'Connections',
+  'Global',
 ] as const;
 
 const proofTypes = [
   'Text',
   'Photo / Post',
   'Video',
+] as const;
+
+const participationDurations = [
+  {
+    label: '1h',
+    minutes: 60,
+  },
+  {
+    label: '6h',
+    minutes: 360,
+  },
+  {
+    label: '12h',
+    minutes: 720,
+  },
+  {
+    label: '24h',
+    minutes: 1440,
+  },
+  {
+    label: '3d',
+    minutes: 4320,
+  },
+  {
+    label: '7d',
+    minutes: 10080,
+  },
+] as const;
+
+const votingDurations = [
+  {
+    label: '1h',
+    minutes: 60,
+  },
+  {
+    label: '6h',
+    minutes: 360,
+  },
+  {
+    label: '12h',
+    minutes: 720,
+  },
+  {
+    label: '24h',
+    minutes: 1440,
+  },
+  {
+    label: '3d',
+    minutes: 4320,
+  },
+  {
+    label: '7d',
+    minutes: 10080,
+  },
 ] as const;
 
 export default function CreateScreen() {
@@ -54,6 +107,16 @@ export default function CreateScreen() {
 
   const [proofType, setProofType] = useState<
     (typeof proofTypes)[number] | null
+  >(null);
+
+  const [participationDuration, setParticipationDuration] = useState<
+    (typeof participationDurations)[number] | null
+  >(null);
+
+  const [votingEnabled, setVotingEnabled] = useState(false);
+
+  const [votingDuration, setVotingDuration] = useState<
+    (typeof votingDurations)[number] | null
   >(null);
 
   const [publishing, setPublishing] = useState(false);
@@ -91,8 +154,8 @@ export default function CreateScreen() {
 
     if (!visibility) {
       Alert.alert(
-        'Visibility required',
-        'Please select who can see this dare.',
+        'Audience required',
+        'Please select who can participate in this dare.',
       );
       return;
     }
@@ -101,6 +164,22 @@ export default function CreateScreen() {
       Alert.alert(
         'Proof required',
         'Please select how the dare must be proved.',
+      );
+      return;
+    }
+
+    if (!participationDuration) {
+      Alert.alert(
+        'Participation duration required',
+        'Please select how long people can participate in this dare.',
+      );
+      return;
+    }
+
+    if (votingEnabled && !votingDuration) {
+      Alert.alert(
+        'Voting duration required',
+        'Please select how long voting should remain open.',
       );
       return;
     }
@@ -120,11 +199,9 @@ export default function CreateScreen() {
       }
 
       const dbVisibility =
-        visibility === 'Anyone'
+        visibility === 'Global'
           ? 'anyone'
-          : visibility === 'Followers'
-            ? 'followers'
-            : 'connections';
+          : 'followers';
 
       const dbDifficulty = difficulty.toLowerCase();
 
@@ -134,6 +211,30 @@ export default function CreateScreen() {
           : proofType === 'Photo / Post'
             ? 'photo'
             : 'video';
+
+      const participationMinutes =
+        participationDuration.minutes;
+
+      const votingMinutes = votingDuration?.minutes ?? null;
+
+      const now = new Date();
+
+      const participationEndsAt = new Date(
+        now.getTime() +
+          participationMinutes * 60 * 1000,
+      );
+
+      const votingStartsAt = votingEnabled
+        ? participationEndsAt
+        : null;
+
+      const votingEndsAt =
+        votingEnabled && votingMinutes
+          ? new Date(
+              participationEndsAt.getTime() +
+                votingMinutes * 60 * 1000,
+            )
+          : null;
 
       const { data, error } = await supabase
         .from('dares')
@@ -149,6 +250,25 @@ export default function CreateScreen() {
           visibility: dbVisibility,
           xp_value: 20,
           status: 'active',
+
+          participation_duration_minutes:
+            participationMinutes,
+
+          participation_ends_at:
+            participationEndsAt.toISOString(),
+
+          voting_enabled: votingEnabled,
+
+          voting_duration_minutes:
+            votingEnabled
+              ? votingMinutes
+              : null,
+
+          voting_starts_at:
+            votingStartsAt?.toISOString() ?? null,
+
+          voting_ends_at:
+            votingEndsAt?.toISOString() ?? null,
         })
         .select('id')
         .single();
@@ -193,7 +313,7 @@ export default function CreateScreen() {
       </Text>
 
       <Text style={styles.subheading}>
-        Create a challenge and publish it to  DareShot.
+        Create a challenge and publish it to DareShot.
       </Text>
 
       <SectionHeader title="What's the dare?" />
@@ -249,7 +369,11 @@ export default function CreateScreen() {
         ))}
       </View>
 
-      <SectionHeader title="Who can see this" />
+      <SectionHeader title="Audience" />
+
+      <Text style={styles.helperText}>
+        Choose who can participate in this dare.
+      </Text>
 
       <View style={styles.chipWrap}>
         {visibilities.map((item) => (
@@ -261,6 +385,77 @@ export default function CreateScreen() {
           />
         ))}
       </View>
+
+      <SectionHeader title="Participation Duration" />
+
+      <Text style={styles.helperText}>
+        New participants can join only while this period is open.
+      </Text>
+
+      <View style={styles.chipWrap}>
+        {participationDurations.map((item) => (
+          <SelectableChip
+            key={item.label}
+            label={item.label}
+            selected={
+              participationDuration?.minutes ===
+              item.minutes
+            }
+            onPress={() =>
+              setParticipationDuration(item)
+            }
+          />
+        ))}
+      </View>
+
+      <SectionHeader title="Voting" />
+
+      <Text style={styles.helperText}>
+        Allow the community to vote on posted dare results.
+      </Text>
+
+      <View style={styles.chipWrap}>
+        <SelectableChip
+          label="OFF"
+          selected={!votingEnabled}
+          onPress={() => {
+            setVotingEnabled(false);
+            setVotingDuration(null);
+          }}
+        />
+
+        <SelectableChip
+          label="ON"
+          selected={votingEnabled}
+          onPress={() => setVotingEnabled(true)}
+        />
+      </View>
+
+      {votingEnabled ? (
+        <>
+          <SectionHeader title="Voting Duration" />
+
+          <Text style={styles.helperText}>
+            Voting starts when the participation period ends.
+          </Text>
+
+          <View style={styles.chipWrap}>
+            {votingDurations.map((item) => (
+              <SelectableChip
+                key={item.label}
+                label={item.label}
+                selected={
+                  votingDuration?.minutes ===
+                  item.minutes
+                }
+                onPress={() =>
+                  setVotingDuration(item)
+                }
+              />
+            ))}
+          </View>
+        </>
+      ) : null}
 
       <View style={styles.ctaWrap}>
         <PrimaryButton

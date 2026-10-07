@@ -613,11 +613,14 @@ const uploadedStoragePath =
          * Proof submission succeeded.
          */
 
-        router.replace(
-          '/(tabs)/dares',
-        );
+        router.replace({
+  pathname: '/post-dare-result',
+  params: {
+    dareParticipantId,
+  },
+});
 
-        return;
+return;
       }
 
       /*
