@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import {
   ActivityIndicator,
@@ -13,97 +13,206 @@ import {
 
 import { supabase } from '../../lib/supabase';
 
-export default function ResetPasswordScreen() {
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+type PasswordMode = 'signup' | 'recovery';
 
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+export default function ResetPasswordScreen() {
+  const params = useLocalSearchParams<{
+    mode?: string;
+  }>();
+
+  const mode: PasswordMode =
+    params.mode === 'recovery'
+      ? 'recovery'
+      : 'signup';
+
+  const isRecovery = mode === 'recovery';
+
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] =
+    useState('');
+
+  const [showPassword, setShowPassword] =
+    useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] =
+    useState(false);
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [errorMessage, setErrorMessage] = useState('');
+  const [errorMessage, setErrorMessage] =
+    useState('');
 
-  const handleUpdatePassword = async () => {
+  const clearFeedback = () => {
     setMessage('');
     setErrorMessage('');
+  };
+
+  const handleUpdatePassword = async () => {
+    clearFeedback();
 
     if (!password || !confirmPassword) {
-      setErrorMessage('New password aur confirm password enter karo.');
+      setErrorMessage(
+        'New password aur confirm password enter karo.',
+      );
       return;
     }
 
     if (password.length < 6) {
-      setErrorMessage('Password kam se kam 6 characters ka hona chahiye.');
+      setErrorMessage(
+        'Password kam se kam 6 characters ka hona chahiye.',
+      );
       return;
     }
 
     if (password !== confirmPassword) {
-      setErrorMessage('Dono passwords same hone chahiye.');
+      setErrorMessage(
+        'Dono passwords same hone chahiye.',
+      );
       return;
     }
 
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.updateUser({
-        password,
-      });
+      /*
+       * OTP verification ke baad Supabase session
+       * already authenticated hona chahiye.
+       */
+      const {
+        data: sessionData,
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error(
+          '[DareMe Auth] Session check error:',
+          sessionError,
+        );
+
+        setErrorMessage(
+          sessionError.message,
+        );
+        setLoading(false);
+        return;
+      }
+
+      if (!sessionData.session) {
+        setErrorMessage(
+          isRecovery
+            ? 'Password reset session expire ho gaya. Please OTP dobara request karo.'
+            : 'Signup session expire ho gaya. Please signup dobara karo.',
+        );
+        setLoading(false);
+        return;
+      }
+
+      const { error } =
+        await supabase.auth.updateUser({
+          password,
+        });
 
       if (error) {
-        console.error('[DareMe Auth] Password update error:', error);
+        console.error(
+          '[DareMe Auth] Password update error:',
+          error,
+        );
 
         setErrorMessage(error.message);
         setLoading(false);
         return;
       }
 
+      /*
+       * SIGNUP FLOW
+       *
+       * OTP → Password → Identity onboarding
+       */
+      if (!isRecovery) {
+        setMessage(
+          'Password created successfully. Setting up your profile...',
+        );
+
+        setTimeout(() => {
+          router.replace('/(onboarding)/identity');
+        }, 700);
+
+        return;
+      }
+
+      /*
+       * RECOVERY FLOW
+       *
+       * OTP → New Password → Sign out → Login
+       *
+       * User explicitly needs to sign in again
+       * using the newly created password.
+       */
       setMessage(
         'Password successfully updated. Redirecting to login...',
       );
 
-      setLoading(false);
+      await supabase.auth.signOut();
 
       setTimeout(() => {
         router.replace('./login');
-      }, 1200);
+      }, 900);
     } catch (error) {
       console.error(
         '[DareMe Auth] Unexpected password update error:',
         error,
       );
 
-      setLoading(false);
-
       setErrorMessage(
         error instanceof Error
           ? error.message
           : 'Password update failed. Please try again.',
       );
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const handleBack = () => {
+    if (loading) {
+      return;
+    }
+
+    router.back();
   };
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={
+        Platform.OS === 'ios'
+          ? 'padding'
+          : undefined
+      }
     >
       <View style={styles.content}>
         <Pressable
-          onPress={() => router.replace('./login')}
+          onPress={handleBack}
           style={styles.backButton}
           disabled={loading}
         >
-          <Text style={styles.backText}>← Back to login</Text>
+          <Text style={styles.backText}>
+            ← Back
+          </Text>
         </Pressable>
 
-        <Text style={styles.logo}>DARESHOT</Text>
+        <Text style={styles.logo}>
+          DARESHOT
+        </Text>
 
-        <Text style={styles.title}>New password.</Text>
+        <Text style={styles.title}>
+          {isRecovery
+            ? 'New password.'
+            : 'Create password.'}
+        </Text>
 
         <Text style={styles.subtitle}>
-          Apna naya password set karo aur apne DareShot account mein
-          wapas jao.
+          {isRecovery
+            ? 'Apna naya password set karo aur apne DareShot account mein wapas jao.'
+            : 'Apne DareShot account ke liye secure password create karo.'}
         </Text>
 
         <View style={styles.form}>
@@ -113,24 +222,37 @@ export default function ResetPasswordScreen() {
               placeholder="New password"
               placeholderTextColor="#77777F"
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(value) => {
+                setErrorMessage('');
+                setPassword(value);
+              }}
               secureTextEntry={!showPassword}
               autoCapitalize="none"
+              autoCorrect={false}
               editable={!loading}
+              textContentType="newPassword"
+              autoComplete="new-password"
+              returnKeyType="next"
             />
 
             <Pressable
               onPress={() =>
-                setShowPassword((current) => !current)
+                setShowPassword(
+                  (current) => !current,
+                )
               }
               style={styles.eyeButton}
               disabled={loading}
               accessibilityLabel={
-                showPassword ? 'Hide password' : 'Show password'
+                showPassword
+                  ? 'Hide password'
+                  : 'Show password'
               }
             >
               <Text style={styles.eyeIcon}>
-                {showPassword ? '🙈' : '👁️'}
+                {showPassword
+                  ? '🙈'
+                  : '👁️'}
               </Text>
             </Pressable>
           </View>
@@ -141,15 +263,29 @@ export default function ResetPasswordScreen() {
               placeholder="Confirm new password"
               placeholderTextColor="#77777F"
               value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              secureTextEntry={!showConfirmPassword}
+              onChangeText={(value) => {
+                setErrorMessage('');
+                setConfirmPassword(value);
+              }}
+              secureTextEntry={
+                !showConfirmPassword
+              }
               autoCapitalize="none"
+              autoCorrect={false}
               editable={!loading}
+              textContentType="newPassword"
+              autoComplete="new-password"
+              returnKeyType="done"
+              onSubmitEditing={
+                handleUpdatePassword
+              }
             />
 
             <Pressable
               onPress={() =>
-                setShowConfirmPassword((current) => !current)
+                setShowConfirmPassword(
+                  (current) => !current,
+                )
               }
               style={styles.eyeButton}
               disabled={loading}
@@ -160,28 +296,36 @@ export default function ResetPasswordScreen() {
               }
             >
               <Text style={styles.eyeIcon}>
-                {showConfirmPassword ? '🙈' : '👁️'}
+                {showConfirmPassword
+                  ? '🙈'
+                  : '👁️'}
               </Text>
             </Pressable>
           </View>
 
           {errorMessage ? (
             <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{errorMessage}</Text>
+              <Text style={styles.errorText}>
+                {errorMessage}
+              </Text>
             </View>
           ) : null}
 
           {message ? (
             <View style={styles.messageBox}>
-              <Text style={styles.messageText}>{message}</Text>
+              <Text style={styles.messageText}>
+                {message}
+              </Text>
             </View>
           ) : null}
 
           <Pressable
             style={({ pressed }) => [
               styles.button,
-              pressed && styles.buttonPressed,
-              loading && styles.buttonDisabled,
+              pressed &&
+                styles.buttonPressed,
+              loading &&
+                styles.buttonDisabled,
             ]}
             onPress={handleUpdatePassword}
             disabled={loading}
@@ -190,7 +334,9 @@ export default function ResetPasswordScreen() {
               <ActivityIndicator color="#0B0B0D" />
             ) : (
               <Text style={styles.buttonText}>
-                🔐 UPDATE PASSWORD
+                {isRecovery
+                  ? '🔐 UPDATE PASSWORD'
+                  : '🔐 CREATE PASSWORD'}
               </Text>
             )}
           </Pressable>

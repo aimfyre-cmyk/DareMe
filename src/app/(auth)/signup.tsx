@@ -18,17 +18,8 @@ type AuthMethod = 'phone' | 'email';
 export default function SignupScreen() {
   const [method, setMethod] = useState<AuthMethod>('phone');
 
-  // Phone state
   const [phone, setPhone] = useState('');
-
-  // Email state
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] =
-    useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] =
-    useState(false);
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -48,7 +39,7 @@ export default function SignupScreen() {
     clearFeedback();
   };
 
-  const handleSendOtp = async () => {
+  const handleSendPhoneOtp = async () => {
     clearFeedback();
 
     const cleanPhone = phone.replace(/\D/g, '');
@@ -66,50 +57,53 @@ export default function SignupScreen() {
     setMessage('Sending verification code...');
 
     try {
-      const { error } =
-        await supabase.auth.signInWithOtp({
-          phone: formattedPhone,
-          options: {
-            shouldCreateUser: true,
-          },
-        });
+      const { error } = await supabase.auth.signInWithOtp({
+        phone: formattedPhone,
+        options: {
+          shouldCreateUser: true,
+        },
+      });
 
       if (error) {
         console.error(
-          '[DareMe Auth] OTP send error:',
+          '[DareMe Auth] Phone signup OTP error:',
           error,
         );
+
         setMessage('');
         setErrorMessage(error.message);
         return;
       }
 
-      setMessage('OTP sent successfully.');
+      setMessage('Verification code sent successfully.');
 
       router.push({
         pathname: './otp',
         params: {
           phone: formattedPhone,
+          type: 'signup',
+          method: 'phone',
         },
       });
     } catch (error) {
       console.error(
-        '[DareMe Auth] Unexpected OTP error:',
+        '[DareMe Auth] Unexpected phone signup OTP error:',
         error,
       );
 
       setMessage('');
+
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : 'Could not send OTP. Please try again.',
+          : 'Could not send verification code. Please try again.',
       );
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEmailSignup = async () => {
+  const handleSendEmailOtp = async () => {
     clearFeedback();
 
     const cleanEmail = email.trim().toLowerCase();
@@ -126,31 +120,20 @@ export default function SignupScreen() {
       return;
     }
 
-    if (password.length < 6) {
-      setErrorMessage(
-        'Password kam se kam 6 characters ka hona chahiye.',
-      );
-      return;
-    }
-
-    if (password !== confirmPassword) {
-      setErrorMessage('Passwords match nahi kar rahe.');
-      return;
-    }
-
     setLoading(true);
-    setMessage('Creating your account...');
+    setMessage('Sending verification code...');
 
     try {
-      const { data, error } =
-        await supabase.auth.signUp({
-          email: cleanEmail,
-          password,
-        });
+      const { error } = await supabase.auth.signInWithOtp({
+        email: cleanEmail,
+        options: {
+          shouldCreateUser: true,
+        },
+      });
 
       if (error) {
         console.error(
-          '[DareMe Auth] Email signup error:',
+          '[DareMe Auth] Email signup OTP error:',
           error,
         );
 
@@ -159,32 +142,28 @@ export default function SignupScreen() {
         return;
       }
 
-      if (data.session) {
-        setMessage(
-          'Account created successfully. Setting up your profile...',
-        );
+      setMessage('Verification code sent successfully.');
 
-        setTimeout(() => {
-          router.replace('/(onboarding)/identity');
-        }, 500);
-
-        return;
-      }
-
-      setMessage(
-        'Account created. Check your email and confirm your account before continuing.',
-      );
+      router.push({
+        pathname: './otp',
+        params: {
+          email: cleanEmail,
+          type: 'signup',
+          method: 'email',
+        },
+      });
     } catch (error) {
       console.error(
-        '[DareMe Auth] Unexpected email signup error:',
+        '[DareMe Auth] Unexpected email signup OTP error:',
         error,
       );
 
       setMessage('');
+
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : 'Could not create your account. Please try again.',
+          : 'Could not send verification code. Please try again.',
       );
     } finally {
       setLoading(false);
@@ -214,9 +193,7 @@ export default function SignupScreen() {
         {/* Auth method switcher */}
         <View style={styles.methodSwitcher}>
           <Pressable
-            onPress={() =>
-              handleMethodChange('phone')
-            }
+            onPress={() => handleMethodChange('phone')}
             style={[
               styles.methodButton,
               method === 'phone' &&
@@ -236,9 +213,7 @@ export default function SignupScreen() {
           </Pressable>
 
           <Pressable
-            onPress={() =>
-              handleMethodChange('email')
-            }
+            onPress={() => handleMethodChange('email')}
             style={[
               styles.methodButton,
               method === 'email' &&
@@ -287,51 +262,21 @@ export default function SignupScreen() {
                     );
                   }}
                   keyboardType="phone-pad"
+                  textContentType="telephoneNumber"
+                  autoComplete="tel"
                   maxLength={10}
                   editable={!loading}
+                  returnKeyType="done"
+                  onSubmitEditing={
+                    handleSendPhoneOtp
+                  }
                 />
               </View>
 
               <Text style={styles.helperText}>
-                We'll send you a 6-digit OTP to verify
-                your number.
+                We'll send you a 6-digit verification
+                code to verify your number.
               </Text>
-
-              {errorMessage ? (
-                <View style={styles.errorBox}>
-                  <Text style={styles.errorText}>
-                    {errorMessage}
-                  </Text>
-                </View>
-              ) : null}
-
-              {message ? (
-                <View style={styles.messageBox}>
-                  <Text style={styles.messageText}>
-                    {message}
-                  </Text>
-                </View>
-              ) : null}
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.button,
-                  pressed &&
-                    styles.buttonPressed,
-                  loading &&
-                    styles.buttonDisabled,
-                ]}
-                onPress={handleSendOtp}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#0B0B0D" />
-                ) : (
-                  <Text style={styles.buttonText}>
-                    ⚡ SEND OTP
-                  </Text>
-                )}
-              </Pressable>
             </>
           ) : (
             <>
@@ -347,122 +292,66 @@ export default function SignupScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
+                textContentType="emailAddress"
+                autoComplete="email"
                 editable={!loading}
+                returnKeyType="done"
+                onSubmitEditing={
+                  handleSendEmailOtp
+                }
               />
 
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={styles.passwordInput}
-                  placeholder="Password"
-                  placeholderTextColor="#77777F"
-                  value={password}
-                  onChangeText={(value) => {
-                    clearFeedback();
-                    setPassword(value);
-                  }}
-                  secureTextEntry={!showPassword}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!loading}
-                />
-
-                <Pressable
-                  onPress={() =>
-                    setShowPassword(
-                      (current) => !current,
-                    )
-                  }
-                  style={styles.eyeButton}
-                  disabled={loading}
-                >
-                  <Text style={styles.eyeIcon}>
-                    {showPassword
-                      ? '🙈'
-                      : '👁️'}
-                  </Text>
-                </Pressable>
-              </View>
-
-              <View style={styles.passwordContainer}>
-                <TextInput
-                  style={styles.passwordInput}
-                  placeholder="Confirm password"
-                  placeholderTextColor="#77777F"
-                  value={confirmPassword}
-                  onChangeText={(value) => {
-                    clearFeedback();
-                    setConfirmPassword(value);
-                  }}
-                  secureTextEntry={
-                    !showConfirmPassword
-                  }
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  editable={!loading}
-                />
-
-                <Pressable
-                  onPress={() =>
-                    setShowConfirmPassword(
-                      (current) => !current,
-                    )
-                  }
-                  style={styles.eyeButton}
-                  disabled={loading}
-                >
-                  <Text style={styles.eyeIcon}>
-                    {showConfirmPassword
-                      ? '🙈'
-                      : '👁️'}
-                  </Text>
-                </Pressable>
-              </View>
-
               <Text style={styles.helperText}>
-                Password must contain at least 6
-                characters.
+                We'll send you a 6-digit verification
+                code to verify your email.
               </Text>
-
-              {errorMessage ? (
-                <View style={styles.errorBox}>
-                  <Text style={styles.errorText}>
-                    {errorMessage}
-                  </Text>
-                </View>
-              ) : null}
-
-              {message ? (
-                <View style={styles.messageBox}>
-                  <Text style={styles.messageText}>
-                    {message}
-                  </Text>
-                </View>
-              ) : null}
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.button,
-                  pressed &&
-                    styles.buttonPressed,
-                  loading &&
-                    styles.buttonDisabled,
-                ]}
-                onPress={handleEmailSignup}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#0B0B0D" />
-                ) : (
-                  <Text style={styles.buttonText}>
-                    ⚡ CREATE ACCOUNT
-                  </Text>
-                )}
-              </Pressable>
             </>
           )}
 
+          {errorMessage ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>
+                {errorMessage}
+              </Text>
+            </View>
+          ) : null}
+
+          {message ? (
+            <View style={styles.messageBox}>
+              <Text style={styles.messageText}>
+                {message}
+              </Text>
+            </View>
+          ) : null}
+
           <Pressable
-            onPress={() => router.replace('./login')}
+            style={({ pressed }) => [
+              styles.button,
+              pressed &&
+                styles.buttonPressed,
+              loading &&
+                styles.buttonDisabled,
+            ]}
+            onPress={
+              method === 'phone'
+                ? handleSendPhoneOtp
+                : handleSendEmailOtp
+            }
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#0B0B0D" />
+            ) : (
+              <Text style={styles.buttonText}>
+                ⚡ SEND VERIFICATION CODE
+              </Text>
+            )}
+          </Pressable>
+
+          <Pressable
+            onPress={() =>
+              router.replace('./login')
+            }
             style={styles.linkButton}
             disabled={loading}
           >
@@ -603,36 +492,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     minHeight: 52,
     paddingHorizontal: 16,
-  },
-
-  passwordContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#151518',
-    borderWidth: 1,
-    borderColor: '#29292E',
-    borderRadius: 12,
-    minHeight: 52,
-  },
-
-  passwordInput: {
-    flex: 1,
-    color: '#FFFFFF',
-    fontFamily: 'Inter-Regular',
-    fontSize: 16,
-    minHeight: 52,
-    paddingHorizontal: 16,
-  },
-
-  eyeButton: {
-    width: 52,
-    minHeight: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  eyeIcon: {
-    fontSize: 18,
   },
 
   helperText: {

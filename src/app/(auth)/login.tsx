@@ -21,12 +21,17 @@ export default function LoginScreen() {
 
   // Email login
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] =
+  const [emailPassword, setEmailPassword] =
+    useState('');
+  const [showEmailPassword, setShowEmailPassword] =
     useState(false);
 
   // Mobile login
   const [phone, setPhone] = useState('');
+  const [phonePassword, setPhonePassword] =
+    useState('');
+  const [showPhonePassword, setShowPhonePassword] =
+    useState(false);
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -54,7 +59,7 @@ export default function LoginScreen() {
 
     const cleanEmail = email.trim().toLowerCase();
 
-    if (!cleanEmail || !password) {
+    if (!cleanEmail || !emailPassword) {
       setErrorMessage(
         'Email aur password enter karo.',
       );
@@ -68,7 +73,7 @@ export default function LoginScreen() {
       const { error } =
         await supabase.auth.signInWithPassword({
           email: cleanEmail,
-          password,
+          password: emailPassword,
         });
 
       if (error) {
@@ -102,10 +107,12 @@ export default function LoginScreen() {
     }
   };
 
-  const handleSendLoginOtp = async () => {
+  const handlePhoneLogin = async () => {
     clearFeedback();
 
-    const cleanPhone = phone.replace(/\D/g, '');
+    const cleanPhone = phone
+      .replace(/\D/g, '')
+      .slice(0, 10);
 
     if (cleanPhone.length !== 10) {
       setErrorMessage(
@@ -114,25 +121,28 @@ export default function LoginScreen() {
       return;
     }
 
+    if (!phonePassword) {
+      setErrorMessage(
+        'Mobile number aur password enter karo.',
+      );
+      return;
+    }
+
     const formattedPhone = `+91${cleanPhone}`;
 
     setLoading(true);
-    setMessage(
-      'Sending verification code...',
-    );
+    setMessage('Logging you in...');
 
     try {
       const { error } =
-        await supabase.auth.signInWithOtp({
+        await supabase.auth.signInWithPassword({
           phone: formattedPhone,
-          options: {
-            shouldCreateUser: false,
-          },
+          password: phonePassword,
         });
 
       if (error) {
         console.error(
-          '[DareMe Auth] Login OTP error:',
+          '[DareMe Auth] Mobile login error:',
           error,
         );
 
@@ -141,17 +151,12 @@ export default function LoginScreen() {
         return;
       }
 
-      setMessage('OTP sent successfully.');
+      setMessage('Login successful.');
 
-      router.push({
-        pathname: './otp',
-        params: {
-          phone: formattedPhone,
-        },
-      });
+      router.replace('/(tabs)');
     } catch (error) {
       console.error(
-        '[DareMe Auth] Unexpected login OTP error:',
+        '[DareMe Auth] Unexpected mobile login error:',
         error,
       );
 
@@ -159,7 +164,7 @@ export default function LoginScreen() {
       setErrorMessage(
         error instanceof Error
           ? error.message
-          : 'Could not send OTP. Please try again.',
+          : 'Could not login. Please try again.',
       );
     } finally {
       setLoading(false);
@@ -176,7 +181,9 @@ export default function LoginScreen() {
       }
     >
       <View style={styles.content}>
-        <Text style={styles.logo}>DARESHOT</Text>
+        <Text style={styles.logo}>
+          DARESHOT
+        </Text>
 
         <Text style={styles.title}>
           Welcome back.
@@ -249,7 +256,10 @@ export default function LoginScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
+                textContentType="emailAddress"
+                autoComplete="email"
                 editable={!loading}
+                returnKeyType="next"
               />
 
               <View
@@ -259,32 +269,41 @@ export default function LoginScreen() {
                   style={styles.passwordInput}
                   placeholder="Password"
                   placeholderTextColor="#77777F"
-                  value={password}
+                  value={emailPassword}
                   onChangeText={(value) => {
                     clearFeedback();
-                    setPassword(value);
+                    setEmailPassword(value);
                   }}
-                  secureTextEntry={!showPassword}
+                  secureTextEntry={
+                    !showEmailPassword
+                  }
                   autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="password"
+                  autoComplete="password"
                   editable={!loading}
+                  returnKeyType="done"
+                  onSubmitEditing={
+                    handleEmailLogin
+                  }
                 />
 
                 <Pressable
                   onPress={() =>
-                    setShowPassword(
+                    setShowEmailPassword(
                       (current) => !current,
                     )
                   }
                   style={styles.eyeButton}
                   accessibilityLabel={
-                    showPassword
+                    showEmailPassword
                       ? 'Hide password'
                       : 'Show password'
                   }
                   disabled={loading}
                 >
                   <Text style={styles.eyeIcon}>
-                    {showPassword
+                    {showEmailPassword
                       ? '🙈'
                       : '👁️'}
                   </Text>
@@ -337,7 +356,9 @@ export default function LoginScreen() {
                     color="#0B0B0D"
                   />
                 ) : (
-                  <Text style={styles.buttonText}>
+                  <Text
+                    style={styles.buttonText}
+                  >
                     ⚡ LOGIN
                   </Text>
                 )}
@@ -347,12 +368,16 @@ export default function LoginScreen() {
             <>
               <View style={styles.phoneContainer}>
                 <View style={styles.countryCode}>
-                  <Text style={styles.countryFlag}>
+                  <Text
+                    style={styles.countryFlag}
+                  >
                     🇮🇳
                   </Text>
 
                   <Text
-                    style={styles.countryCodeText}
+                    style={
+                      styles.countryCodeText
+                    }
                   >
                     +91
                   </Text>
@@ -373,14 +398,79 @@ export default function LoginScreen() {
                     );
                   }}
                   keyboardType="phone-pad"
+                  textContentType="telephoneNumber"
+                  autoComplete="tel"
                   maxLength={10}
                   editable={!loading}
+                  returnKeyType="next"
                 />
               </View>
 
+              <View
+                style={styles.passwordContainer}
+              >
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="Password"
+                  placeholderTextColor="#77777F"
+                  value={phonePassword}
+                  onChangeText={(value) => {
+                    clearFeedback();
+                    setPhonePassword(value);
+                  }}
+                  secureTextEntry={
+                    !showPhonePassword
+                  }
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  textContentType="password"
+                  autoComplete="password"
+                  editable={!loading}
+                  returnKeyType="done"
+                  onSubmitEditing={
+                    handlePhoneLogin
+                  }
+                />
+
+                <Pressable
+                  onPress={() =>
+                    setShowPhonePassword(
+                      (current) => !current,
+                    )
+                  }
+                  style={styles.eyeButton}
+                  accessibilityLabel={
+                    showPhonePassword
+                      ? 'Hide password'
+                      : 'Show password'
+                  }
+                  disabled={loading}
+                >
+                  <Text style={styles.eyeIcon}>
+                    {showPhonePassword
+                      ? '🙈'
+                      : '👁️'}
+                  </Text>
+                </Pressable>
+              </View>
+
+              <Pressable
+                onPress={() =>
+                  router.push(
+                    './forgot-password',
+                  )
+                }
+                style={styles.forgotButton}
+                disabled={loading}
+              >
+                <Text style={styles.forgotText}>
+                  Forgot password?
+                </Text>
+              </Pressable>
+
               <Text style={styles.helperText}>
-                We'll send you a 6-digit OTP to
-                verify your number.
+                Mobile number aur password se
+                directly login karo.
               </Text>
 
               {errorMessage ? (
@@ -407,7 +497,7 @@ export default function LoginScreen() {
                   loading &&
                     styles.buttonDisabled,
                 ]}
-                onPress={handleSendLoginOtp}
+                onPress={handlePhoneLogin}
                 disabled={loading}
               >
                 {loading ? (
@@ -415,8 +505,10 @@ export default function LoginScreen() {
                     color="#0B0B0D"
                   />
                 ) : (
-                  <Text style={styles.buttonText}>
-                    ⚡ SEND OTP
+                  <Text
+                    style={styles.buttonText}
+                  >
+                    ⚡ LOGIN
                   </Text>
                 )}
               </Pressable>
