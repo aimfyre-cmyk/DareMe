@@ -34,6 +34,7 @@ type RankingUser = {
   xp: number;
   completed_dares: number;
   is_dare_master: boolean;
+  is_dare_winner: boolean;
 };
 
 export default function GlobalRankingScreen() {
@@ -71,6 +72,21 @@ export default function GlobalRankingScreen() {
       if (rankingError) {
         throw rankingError;
       }
+
+const {
+  data: winnerRows,
+  error: winnerError,
+} = await supabase.rpc('get_dare_winner_user_ids');
+
+if (winnerError) {
+  throw winnerError;
+}
+
+const dareWinnerUserIds = new Set(
+  ((winnerRows ?? []) as Array<{ user_id: string }>)
+    .map((row) => row.user_id)
+    .filter(Boolean),
+);
 
       const rankingRows = (data ?? []) as Array<{
         rank: number | string;
@@ -117,17 +133,18 @@ export default function GlobalRankingScreen() {
           }
 
           return {
-            rank,
-            user_id: item.user_id,
-            display_name: item.display_name,
-            username: item.username,
-            avatar_url: resolvedAvatarUrl,
-            xp: Number(item.xp),
-            completed_dares: Number(item.completed_dares),
-            is_dare_master: Boolean(
-              item.is_dare_master,
-            ),
-          };
+  rank,
+  user_id: item.user_id,
+  display_name: item.display_name,
+  username: item.username,
+  avatar_url: resolvedAvatarUrl,
+  xp: Number(item.xp),
+  completed_dares: Number(item.completed_dares),
+  is_dare_master: Boolean(
+    item.is_dare_master,
+  ),
+  is_dare_winner: dareWinnerUserIds.has(item.user_id),
+};
         }),
       );
 
@@ -201,6 +218,17 @@ export default function GlobalRankingScreen() {
                 </Text>
               </View>
             ) : null}
+
+            {currentUser.is_dare_winner ? (
+  <View style={styles.myWinnerBadge}>
+    <Text style={styles.myWinnerBadgeText}>
+      🏆 Dare Winner
+    </Text>
+  </View>
+) : null}
+
+
+
           </View>
 
           <View style={styles.myRankRight}>
@@ -334,6 +362,14 @@ export default function GlobalRankingScreen() {
                         </Text>
                       </View>
                     ) : null}
+
+                    {item.is_dare_winner ? (
+  <View style={styles.winnerBadge}>
+    <Text style={styles.winnerBadgeText}>
+      🏆 Dare Winner
+    </Text>
+  </View>
+) : null}
                   </View>
 
                   {username ? (
@@ -461,6 +497,24 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
 
+myWinnerBadge: {
+  alignSelf: 'flex-start',
+  marginTop: 6,
+  paddingHorizontal: spacing.sm,
+  paddingVertical: 4,
+  borderRadius: 10,
+  backgroundColor: colors.surfaceElevated,
+  borderWidth: 1,
+  borderColor: colors.accent,
+},
+
+myWinnerBadgeText: {
+  color: colors.accent,
+  fontSize: fontSize.xs,
+  fontWeight: '900',
+},
+
+
   list: {
     gap: spacing.sm,
   },
@@ -555,6 +609,21 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     fontWeight: '900',
   },
+
+winnerBadge: {
+  paddingHorizontal: spacing.sm,
+  paddingVertical: 3,
+  borderRadius: 10,
+  backgroundColor: colors.surfaceElevated,
+  borderWidth: 1,
+  borderColor: colors.accent,
+},
+
+winnerBadgeText: {
+  color: colors.accent,
+  fontSize: fontSize.xs,
+  fontWeight: '900',
+},
 
   username: {
     color: colors.secondaryText,

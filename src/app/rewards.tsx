@@ -739,11 +739,13 @@ export default function RewardsScreen() {
                 <Text
                   style={styles.claimedIcon}
                 >
-                  {reward.reward_title
-                    .toLowerCase()
-                    .includes('master')
-                    ? '👑'
-                    : '🎁'}
+                  {reward.reward_id === 'dare-master' ||
+reward.reward_title.toLowerCase().includes('master')
+  ? '👑'
+  : reward.reward_id.startsWith('dare-winner-') ||
+      reward.reward_title.toLowerCase().includes('dare winner')
+    ? '🏆'
+    : '🎁'}
                 </Text>
 
                 <View
@@ -809,11 +811,13 @@ export default function RewardsScreen() {
                   <Text
                     style={styles.historyIcon}
                   >
-                    {reward.reward_title
-                      .toLowerCase()
-                      .includes('master')
-                      ? '👑'
-                      : '🎁'}
+                    {reward.reward_id === 'dare-master' ||
+reward.reward_title.toLowerCase().includes('master')
+  ? '👑'
+  : reward.reward_id.startsWith('dare-winner-') ||
+      reward.reward_title.toLowerCase().includes('dare winner')
+    ? '🏆'
+    : '🎁'}
                   </Text>
                 </View>
 

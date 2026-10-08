@@ -332,6 +332,30 @@ export default function CreatePostScreen() {
         );
       }
 
+let dareIdForPost: string | null = null;
+
+if (isDareProof && dareParticipantId) {
+  const {
+    data: participant,
+    error: participantError,
+  } = await supabase
+    .from('dare_participants')
+    .select('dare_id')
+    .eq('id', dareParticipantId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (participantError) {
+    throw participantError;
+  }
+
+  if (!participant?.dare_id) {
+    throw new Error('Could not find the Dare for this proof.');
+  }
+
+  dareIdForPost = participant.dare_id;
+}
+
       /*
        * =================================================
        * POST TYPE
@@ -359,23 +383,17 @@ export default function CreatePostScreen() {
         error: postError,
       } = await supabase
         .from('posts')
-        .insert({
-          user_id: user.id,
-          post_type: postType,
-          content:
-            trimmedContent || null,
-          media_url: null,
-          media_type: mediaType,
-
-          /*
-           * Dare proof posts are public.
-           */
-          visibility: isDareProof
-            ? 'anyone'
-            : visibility,
-
-          status: 'active',
-        })
+          .insert({
+  user_id: user.id,
+  post_type: postType,
+  content: trimmedContent || null,
+  media_url: null,
+  media_type: mediaType,
+  dare_id: dareIdForPost,
+  visibility: isDareProof ? 'anyone' : visibility,
+  status: 'active',
+})
+        
         .select('id')
         .single();
 
@@ -613,13 +631,7 @@ const uploadedStoragePath =
          * Proof submission succeeded.
          */
 
-        router.replace({
-  pathname: '/post-dare-result',
-  params: {
-    dareParticipantId,
-  },
-});
-
+        router.replace('/(tabs)');
 return;
       }
 

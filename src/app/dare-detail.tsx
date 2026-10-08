@@ -434,28 +434,6 @@ export default function DareDetailScreen() {
     }
     void handleTakeDare();
   };
-
-
-
-/*
- * =====================================================
- * RESPONSE POOL
- * =====================================================
- */
-
-const handleOpenResponsePool = () => {
-  if (!dare?.id) {
-    return;
-  }
-
-  router.push({
-    pathname: '/dare-response-pool',
-    params: {
-      dareId: dare.id,
-    },
-  });
-};
-
   if (loading) {
     return (
       <View style={styles.center}>
@@ -662,46 +640,32 @@ const handleOpenResponsePool = () => {
               </Text>
             )}
           </Pressable>
-
-{/* =================================================
-    RESPONSE POOL
-    ================================================= */}
-
-<Pressable
-  onPress={handleOpenResponsePool}
-  style={({ pressed }) => [
-    styles.responsePoolButton,
-    pressed && styles.responsePoolButtonPressed,
-  ]}
-  accessibilityRole="button"
-  accessibilityLabel="Open Dare Response Pool"
->
-  <View style={styles.responsePoolButtonContent}>
-    <View style={styles.responsePoolButtonTextWrap}>
-      <Text style={styles.responsePoolButtonTitle}>
-        RESPONSE POOL
-      </Text>
-
-      <Text style={styles.responsePoolButtonSubtitle}>
-        View participant Dare results
-        {dare.voting_enabled
-          ? ' and voting'
-          : ''}
-      </Text>
-    </View>
-
-    <Text style={styles.responsePoolButtonArrow}>
-      ›
-    </Text>
-  </View>
-</Pressable>
-
-{participantState === 'COMPLETED' && (
-  <Text style={styles.bottomHint}>
-    Your completion, XP, ranking and future recognition
-    are handled by the Dare system.
-  </Text>
-)}
+          {participantState === 'COMPLETED' && (
+            <>
+              <Pressable
+                onPress={() => {
+                  if (!dare.id) return;
+                  router.push({
+                    pathname: '/dare-response-pool',
+                    params: { dareId: dare.id },
+                  });
+                }}
+                style={({ pressed }) => [
+                  styles.responsePoolButton,
+                  pressed && styles.responsePoolButtonPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel="Open Dare Response Pool"
+              >
+                <Text style={styles.responsePoolButtonText}>
+                  RESPONSE POOL
+                </Text>
+              </Pressable>
+              <Text style={styles.bottomHint}>
+                View submitted Dare results and voting responses.
+              </Text>
+            </>
+          )}
         </View>
       </ScrollView>
     </View>
@@ -896,53 +860,25 @@ const styles = StyleSheet.create({
   completedButtonText: {
     opacity: 0.8,
   },
-
-responsePoolButton: {
-  minHeight: 64,
-  borderRadius: radius.md,
-  backgroundColor: colors.surface,
-  borderWidth: 1,
-  borderColor: colors.border,
-  marginTop: spacing.sm,
-  paddingHorizontal: spacing.md,
-  justifyContent: 'center',
-},
-
-responsePoolButtonPressed: {
-  opacity: 0.72,
-},
-
-responsePoolButtonContent: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-},
-
-responsePoolButtonTextWrap: {
-  flex: 1,
-  paddingRight: spacing.sm,
-},
-
-responsePoolButtonTitle: {
-  color: colors.primaryText,
-  fontFamily: fontFamily.bodyMedium,
-  fontSize: fontSize.sm,
-},
-
-responsePoolButtonSubtitle: {
-  color: colors.secondaryText,
-  fontFamily: fontFamily.body,
-  fontSize: fontSize.xs,
-  lineHeight: 18,
-  marginTop: 2,
-},
-
-responsePoolButtonArrow: {
-  color: colors.primaryText,
-  fontSize: 30,
-  lineHeight: 30,
-},
-
+  responsePoolButton: {
+    minHeight: 50,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+  },
+  responsePoolButtonPressed: {
+    opacity: 0.7,
+  },
+  responsePoolButtonText: {
+    color: colors.accent,
+    fontFamily: fontFamily.bodyMedium,
+    fontSize: fontSize.sm,
+    textAlign: 'center',
+  },
   bottomHint: {
     color: colors.secondaryText,
     fontFamily: fontFamily.body,

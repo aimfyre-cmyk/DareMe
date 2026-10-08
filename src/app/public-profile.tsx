@@ -33,6 +33,7 @@ type Profile = {
   xp_total: number | null;
   level: number | null;
   streak_count: number | null;
+  is_dare_winner: boolean;
 };
 
 type UserPost = {
@@ -176,7 +177,25 @@ if (profileWithAvatar.avatar_url) {
   }
 }
 
-setProfile(profileWithAvatar);
+const {
+  data: winnerRows,
+  error: winnerError,
+} = await supabase.rpc('get_dare_winner_user_ids');
+
+if (winnerError) {
+  throw winnerError;
+}
+
+const isDareWinner = (
+  (winnerRows ?? []) as Array<{ user_id: string }>
+).some(
+  (row) => row.user_id === userId,
+);
+
+setProfile({
+  ...profileWithAvatar,
+  is_dare_winner: isDareWinner,
+});
 
       const [
         followersResult,
@@ -529,14 +548,22 @@ if (signedError) {
           )}
 
           <Text style={styles.displayName}>
-            {displayName}
-          </Text>
+  {displayName}
+</Text>
 
-          {username ? (
-            <Text style={styles.username}>
-              {username}
-            </Text>
-          ) : null}
+{profile.is_dare_winner ? (
+  <View style={styles.winnerBadge}>
+    <Text style={styles.winnerBadgeText}>
+      🏆 Dare Winner
+    </Text>
+  </View>
+) : null}
+
+{username ? (
+  <Text style={styles.username}>
+    {username}
+  </Text>
+) : null}
 
           {/* Profile Actions */}
           {!isOwnProfile ? (
@@ -943,6 +970,22 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     marginTop: 4,
   },
+
+winnerBadge: {
+  marginTop: spacing.sm,
+  paddingHorizontal: spacing.md,
+  paddingVertical: 5,
+  borderRadius: 14,
+  backgroundColor: colors.surface,
+  borderWidth: 1,
+  borderColor: colors.accent,
+},
+
+winnerBadgeText: {
+  color: colors.accent,
+  fontFamily: fontFamily.bodyMedium,
+  fontSize: fontSize.xs,
+},
 
   messageModalBackdrop: {
     flex: 1,

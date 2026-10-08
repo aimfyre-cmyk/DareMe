@@ -202,7 +202,7 @@ type SocialPost = {
 
   post_type: string;
 
-
+  dare_id: string | null;
 
   content: string | null;
 
@@ -527,7 +527,7 @@ function mapDare(dare: RealDare): MockDare {
 
 export default function DiscoverScreen() {
 
-
+const router = useRouter();
 
   const [posts, setPosts] = useState<FeedPost[]>([]);
 
@@ -854,11 +854,12 @@ export default function DiscoverScreen() {
 
 
 
-        .select(
+        
 
 
 
-          'id,user_id,post_type,content,media_url,media_type,visibility,status,created_at',
+          .select(
+  'id,user_id,post_type,content,media_url,media_type,dare_id,visibility,status,created_at',
 
 
 
@@ -918,7 +919,90 @@ export default function DiscoverScreen() {
 
 
 
-      if (socialPosts.length === 0) {
+      
+      // =====================================================
+      // DARE POST BACKFILL
+      // Existing Dare proof posts may have a null posts.dare_id.
+      // Their dare_proofs.storage_path is linked as post:<postId>.
+      // Recover the Dare id without changing normal posts.
+      // =====================================================
+      const postsMissingDareId = socialPosts.filter(
+        (post) => !post.dare_id,
+      );
+
+      if (postsMissingDareId.length > 0) {
+        const postStoragePaths = postsMissingDareId.map(
+          (post) => `post:${post.id}`,
+        );
+
+        const { data: proofRows, error: proofRowsError } =
+          await supabase
+            .from('dare_proofs')
+            .select('participant_id,storage_path')
+            .in('storage_path', postStoragePaths);
+
+        if (proofRowsError) {
+          console.warn(
+            'Could not backfill Dare ids for proof posts:',
+            proofRowsError,
+          );
+        } else if ((proofRows ?? []).length > 0) {
+          const participantIds = Array.from(
+            new Set(
+              (proofRows ?? [])
+                .map((row) => row.participant_id)
+                .filter(
+                  (id): id is string =>
+                    typeof id === 'string' && id.length > 0,
+                ),
+            ),
+          );
+
+          if (participantIds.length > 0) {
+            const { data: participantRows, error: participantRowsError } =
+              await supabase
+                .from('dare_participants')
+                .select('id,dare_id')
+                .in('id', participantIds);
+
+            if (participantRowsError) {
+              console.warn(
+                'Could not load Dare ids for proof posts:',
+                participantRowsError,
+              );
+            } else {
+              const participantDareMap = new Map(
+                (participantRows ?? []).map((row) => [
+                  row.id,
+                  row.dare_id,
+                ]),
+              );
+
+              const proofDareMap = new Map<string, string>();
+
+              (proofRows ?? []).forEach((row) => {
+                const dareId = participantDareMap.get(row.participant_id);
+                if (dareId && row.storage_path) {
+                  proofDareMap.set(row.storage_path, dareId);
+                }
+              });
+
+              socialPosts.forEach((post) => {
+                if (!post.dare_id) {
+                  const recoveredDareId = proofDareMap.get(
+                    `post:${post.id}`,
+                  );
+                  if (recoveredDareId) {
+                    post.dare_id = recoveredDareId;
+                  }
+                }
+              });
+            }
+          }
+        }
+      }
+
+if (socialPosts.length === 0) {
 
 
 
@@ -4074,7 +4158,16 @@ useEffect(() => {
 
               post={post}
 
-
+onOpenDare={() => {
+  if (post.dare_id) {
+    router.push({
+      pathname: '/dare-detail',
+      params: {
+        id: post.dare_id,
+      },
+    });
+  }
+}}
 
               onLike={() => handleLike(post)}
 
@@ -4588,6 +4681,8 @@ function PostCard({
 
   post,
 
+  onOpenDare,
+
   onLike,
 
   onLikeCountPress,
@@ -4607,6 +4702,8 @@ function PostCard({
 }: {
 
   post: FeedPost;
+
+  onOpenDare: () => void;
 
   onLike: () => void;
 
@@ -4988,155 +5085,48 @@ function PostCard({
 
       </Pressable>
 
-
-
-
-
-
-
-      {/* Caption */}
-
-
-
-      {post.content ? (
-
-
-
-        <Text
-
-
-
-          style={styles.postContent}
-
-
-
-       >
-
-
-
-          {post.content}
-
-
-
-        </Text>
-
-
-
-      ) : null}
-
-
-
-
-
-
-
-      {/* Photo */}
-
-
-
-      {isPhoto ? (
-
-
-
-        <Image
-
-
-
-          source={{
-
-
-
-            uri: post.signedMediaUrl!,
-
-
-
-          }}
-
-
-
-          style={styles.postImage}
-
-
-
-          resizeMode="contain"
-
-
-
-        />
-
-
-
-      ) : null}
-
-
-
-      {isVideo ? (
-
-
-
-  <PostVideo
-
-
-
-  uri={post.signedMediaUrl!}
-
-
-
-  scrollY={scrollY}
-
-
-
-  screenFocused={screenFocused}
-
-
-
-/>
-
-
-
-) : null}
-
-
-
-
-
-
-
-      {/* Text-only indicator */}
-
-
-
-      {isText && !post.content ? (
-
-
-
-        <Text
-
-
-
-          style={styles.emptyPostText}
-
-
-
-       >
-
-
-
-          Shared a post
-
-
-
-        </Text>
-
-
-
-      ) : null}
-
-
-
-
-
-
+      <Pressable
+        onPress={onOpenDare}
+        disabled={!post.dare_id}
+        accessibilityRole={post.dare_id ? 'button' : undefined}
+        accessibilityLabel={
+          post.dare_id ? 'Open Dare details' : undefined
+        }
+      >
+        {/* Caption */}
+        {post.content ? (
+          <Text style={styles.postContent}>
+            {post.content}
+          </Text>
+        ) : null}
+
+        {/* Photo */}
+        {isPhoto ? (
+          <Image
+            source={{
+              uri: post.signedMediaUrl!,
+            }}
+            style={styles.postImage}
+            resizeMode="contain"
+          />
+        ) : null}
+
+        {/* Video */}
+        {isVideo ? (
+          <PostVideo
+            uri={post.signedMediaUrl!}
+            scrollY={scrollY}
+            screenFocused={screenFocused}
+          />
+        ) : null}
+
+        {/* Text-only indicator */}
+        {isText && !post.content ? (
+          <Text style={styles.emptyPostText}>
+            Shared a post
+          </Text>
+        ) : null}
+      </Pressable>
 
       {/* Social actions */}
 
