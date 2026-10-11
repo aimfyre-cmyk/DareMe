@@ -33,6 +33,9 @@ function isValidObjectKey(key: string) {
     !key.startsWith("http://") &&
     !key.startsWith("https://") &&
     !key.includes("..") &&
+    // No "." or empty segments, so "./private-shots/x" can't dodge the
+    // private prefix check below.
+    !key.split("/").some((segment) => segment === "" || segment === ".") &&
     // deno-lint-ignore no-control-regex
     !/[\u0000-\u001f\u007f]/.test(key);
 }

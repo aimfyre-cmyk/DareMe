@@ -30,3 +30,10 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/private-shot-proof-url/deno.json"
 entrypoint = "./functions/private-shot-proof-url/index.ts"
+
+[functions.cloudflare-stream-upload-url]
+enabled = true
+# Live with gateway JWT verification on; the function also calls auth.getUser().
+# Deploy by name WITHOUT --no-verify-jwt.
+verify_jwt = true
+entrypoint = "./functions/cloudflare-stream-upload-url/index.ts"

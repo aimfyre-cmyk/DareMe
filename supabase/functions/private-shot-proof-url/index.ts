@@ -30,11 +30,16 @@ const R2_KEY_RE =
 type ShotResponse = {
   media_type?: unknown;
   media_key?: unknown;
+  responder_id?: unknown;
 };
+
+// Stream upload meta.source set by cloudflare-stream-upload-url.
+const STREAM_SOURCE = "dareshot-private-shot";
 
 type StreamVideo = {
   readyToStream?: boolean;
   requireSignedURLs?: boolean;
+  meta?: Record<string, unknown>;
   playback?: { hls?: string };
   status?: {
     state?: string;
@@ -50,13 +55,23 @@ function errorResponse(error: string, status: number) {
   );
 }
 
-async function streamPlayback(uid: string) {
+// Signed manifest URLs per video, reused while this isolate is warm so a
+// proof watched repeatedly doesn't mint a new token every time.
+const signedUrlCache = new Map<string, { url: string; expiresAtMs: number }>();
+const MIN_REMAINING_MS = 10 * 60 * 1000;
+
+async function streamPlayback(uid: string, responderId: string | null) {
   const accountId = Deno.env.get("CLOUDFLARE_ACCOUNT_ID");
   const apiToken = Deno.env.get("CLOUDFLARE_STREAM_API_TOKEN");
 
   if (!accountId || !apiToken) {
     console.error("Cloudflare Stream configuration is missing");
     return errorResponse("Media service is not configured", 500);
+  }
+
+  const cached = signedUrlCache.get(uid);
+  if (cached && cached.expiresAtMs - Date.now() > MIN_REMAINING_MS) {
+    return streamReady(cached.url, cached.expiresAtMs);
   }
 
   const base =
@@ -80,6 +95,19 @@ async function streamPlayback(uid: string) {
 
   const video = videoBody.result as StreamVideo;
 
+  // media_key comes from the client when a proof is submitted, so make sure
+  // it points at a private-shot upload by this shot's responder, not at some
+  // other video in the account.
+  const uploaderId = video.meta?.userId;
+  if (
+    video.meta?.source !== STREAM_SOURCE ||
+    (typeof uploaderId === "string" && responderId &&
+      uploaderId !== responderId)
+  ) {
+    console.error("Stream video does not belong to this proof", { uid });
+    return errorResponse("Unsupported proof media", 422);
+  }
+
   if (video.status?.state === "error") {
     return Response.json(
       {
@@ -102,31 +130,58 @@ async function streamPlayback(uid: string) {
     });
   }
 
-  let url = hls;
+  let requireSigned = video.requireSignedURLs === true;
 
-  if (video.requireSignedURLs) {
-    const exp = Math.floor(Date.now() / 1000) + URL_TTL_SECONDS;
-
-    const tokenResponse = await fetch(`${base}/token`, {
+  if (!requireSigned) {
+    // Older uploads were created playable by UID. Make them signed-only the
+    // first time they are viewed through here.
+    const editResponse = await fetch(base, {
       method: "POST",
       headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ exp }),
+      body: JSON.stringify({ uid, requireSignedURLs: true }),
     });
-    const tokenBody = await tokenResponse.json().catch(() => null);
-    const token = tokenBody?.result?.token;
+    const editBody = await editResponse.json().catch(() => null);
+    requireSigned = editResponse.ok &&
+      editBody?.result?.requireSignedURLs === true;
 
-    if (!tokenResponse.ok || typeof token !== "string" || !token) {
-      console.error("Cloudflare Stream token request failed:", {
-        status: tokenResponse.status,
-        errors: tokenBody?.errors,
+    if (!requireSigned) {
+      console.error("Could not make Stream video signed-only:", {
+        uid,
+        status: editResponse.status,
+        errors: editBody?.errors,
       });
-      return errorResponse("Unable to load proof media", 502);
+      // Still playable by UID (as before); serve it rather than fail.
+      return streamReady(hls, Date.now() + URL_TTL_SECONDS * 1000);
     }
-
-    // The signed token replaces the UID in the manifest path.
-    url = `${new URL(hls).origin}/${token}/manifest/video.m3u8`;
   }
 
+  const expSeconds = Math.floor(Date.now() / 1000) + URL_TTL_SECONDS;
+
+  const tokenResponse = await fetch(`${base}/token`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify({ exp: expSeconds }),
+  });
+  const tokenBody = await tokenResponse.json().catch(() => null);
+  const token = tokenBody?.result?.token;
+
+  if (!tokenResponse.ok || typeof token !== "string" || !token) {
+    console.error("Cloudflare Stream token request failed:", {
+      status: tokenResponse.status,
+      errors: tokenBody?.errors,
+    });
+    return errorResponse("Unable to load proof media", 502);
+  }
+
+  // The signed token replaces the UID in the manifest path.
+  const url = `${new URL(hls).origin}/${token}/manifest/video.m3u8`;
+  const expiresAtMs = expSeconds * 1000;
+  signedUrlCache.set(uid, { url, expiresAtMs });
+
+  return streamReady(url, expiresAtMs);
+}
+
+function streamReady(url: string, expiresAtMs: number) {
   return Response.json({
     success: true,
     status: "ready",
@@ -134,7 +189,7 @@ async function streamPlayback(uid: string) {
       kind: "stream",
       url,
       contentType: "hls",
-      expiresAt: new Date(Date.now() + URL_TTL_SECONDS * 1000).toISOString(),
+      expiresAt: new Date(expiresAtMs).toISOString(),
     },
   });
 }
@@ -188,7 +243,9 @@ export default {
         return errorResponse("Method not allowed", 405);
       }
 
-      if (!ctx.userClaims?.id) {
+      const userId = ctx.userClaims?.id;
+
+      if (!userId) {
         return errorResponse("Authenticated user not found", 401);
       }
 
@@ -202,7 +259,24 @@ export default {
           return errorResponse("A valid shotId is required", 400);
         }
 
-        // Runs as the caller: the RPC decides whether they may see it.
+        // Both reads run as the caller, so RLS and the RPC's own checks
+        // apply. The explicit participant check is defense in depth.
+        const { data: shot, error: shotError } = await ctx.supabase
+          .from("private_shots")
+          .select("sender_id, receiver_id")
+          .eq("id", shotId)
+          .maybeSingle();
+
+        if (
+          shotError || !shot ||
+          (shot.sender_id !== userId && shot.receiver_id !== userId)
+        ) {
+          if (shotError) {
+            console.warn("private_shots lookup failed:", shotError.code);
+          }
+          return errorResponse("You can't view this proof", 403);
+        }
+
         const { data, error } = await ctx.supabase.rpc(
           "get_private_shot_response",
           { p_shot_id: shotId },
@@ -229,7 +303,10 @@ export default {
         }
 
         if (STREAM_UID_RE.test(mediaKey)) {
-          return await streamPlayback(mediaKey);
+          const responderId = typeof response?.responder_id === "string"
+            ? response.responder_id
+            : null;
+          return await streamPlayback(mediaKey, responderId);
         }
 
         if (R2_KEY_RE.test(mediaKey)) {

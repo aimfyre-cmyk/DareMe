@@ -701,7 +701,7 @@ export default function CreateScreen() {
 
          UPLOAD DARE MEDIA TO CLOUDFLARE R2
 
-         Upload first so the R2 key can be written directly into
+         Uploaded before the INSERT so the R2 key can be written into
 
          the initial Supabase INSERT. This avoids the previous
 
@@ -1518,17 +1518,7 @@ async function uploadDareAssetToR2({
 
   const contentType =
 
-    mimeType ||
-
-    (kind === 'audio'
-
-      ? 'audio/mpeg'
-
-      : kind === 'video'
-
-        ? 'video/mp4'
-
-        : 'image/jpeg');
+    mimeType || getDareDefaultContentType(kind);
 
   const {
 
@@ -1706,7 +1696,9 @@ function getDareFileExtension(
 
 function getDareDefaultContentType(kind: UploadKind): string {
 
-  // Same defaults uploadDareAssetToR2 uses when the picker gives no MIME type.
+  // Fallback when the picker gives no MIME type. Used both when uploading and
+
+  // in pick-time validation, so the two always agree.
 
   return kind === 'audio'
 

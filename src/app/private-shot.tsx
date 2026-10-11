@@ -583,6 +583,9 @@ const shotOptions: Array<{
 
 
 
+// Retries while a Cloudflare Stream proof is still encoding (~1 minute).
+const MAX_PROOF_RETRIES = 6;
+
 function ProofVideo({
   uri,
   contentType,
@@ -891,8 +894,10 @@ export default function PrivateShotScreen({
   const [shotProofLoading, setShotProofLoading] = useState(false);
   const [shotProofContentType, setShotProofContentType] =
     useState<'hls' | 'progressive'>('progressive');
-  // The shot whose proof is being loaded; older in-flight loads are ignored.
-  const activeProofShotIdRef = useRef<string | null>(null);
+  // Bumped for every proof load (and on reset), so older in-flight loads and
+  // pending retries can tell they are stale.
+  const proofRequestRef = useRef(0);
+  const proofRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -1066,10 +1071,19 @@ export default function PrivateShotScreen({
     if (shot?.status === 'completed') {
       void loadShotProof(shot.id);
     } else {
-      activeProofShotIdRef.current = null;
       setShotProof(null);
       setShotProofUrl(null);
+      setShotProofLoading(false);
     }
+
+    return () => {
+      // Drop in-flight loads and pending retries for the previous shot.
+      proofRequestRef.current += 1;
+      if (proofRetryTimerRef.current) {
+        clearTimeout(proofRetryTimerRef.current);
+        proofRetryTimerRef.current = null;
+      }
+    };
   }, [shot?.id, shot?.status]);
 
 
@@ -1796,14 +1810,18 @@ export default function PrivateShotScreen({
     }
   };
 
-  const loadShotProof = async (shotId: string) => {
-    activeProofShotIdRef.current = shotId;
-    const isCurrent = () => activeProofShotIdRef.current === shotId;
+  const loadShotProof = async (shotId: string, attempt = 0) => {
+    const request = ++proofRequestRef.current;
+    const isCurrent = () => proofRequestRef.current === request;
 
     try {
-      setShotProofLoading(true);
-      setShotProof(null);
-      setShotProofUrl(null);
+      // Retries run quietly in the background; only the first load shows
+      // the spinner.
+      if (attempt === 0) {
+        setShotProofLoading(true);
+        setShotProof(null);
+        setShotProofUrl(null);
+      }
 
       const { data: responseData, error: responseError } =
         await supabase.rpc('get_private_shot_response', {
@@ -1829,11 +1847,22 @@ export default function PrivateShotScreen({
 
       const proof = urlData as {
         status?: 'ready' | 'processing';
+        retryAfterSeconds?: number;
         playback?: { url?: string; contentType?: 'hls' | 'progressive' };
       } | null;
 
-      // Still encoding on Cloudflare Stream: the card shows "not available yet".
-      if (proof?.status === 'processing') return;
+      // Still encoding on Cloudflare Stream: the card shows "not available
+      // yet" and we check again shortly.
+      if (proof?.status === 'processing') {
+        if (attempt < MAX_PROOF_RETRIES) {
+          const delayMs = Math.max(1, proof.retryAfterSeconds ?? 10) * 1000;
+          proofRetryTimerRef.current = setTimeout(() => {
+            proofRetryTimerRef.current = null;
+            if (isCurrent()) void loadShotProof(shotId, attempt + 1);
+          }, delayMs);
+        }
+        return;
+      }
 
       if (!proof?.playback?.url) {
         throw new Error('Proof playback URL was not returned.');
