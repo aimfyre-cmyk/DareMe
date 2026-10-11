@@ -1,4 +1,5 @@
 import { File } from 'expo-file-system';
+import { toFunctionError } from '../../lib/functionError';
 import { supabase } from '../../lib/supabase';
 
 export type ProfileData = {
@@ -110,12 +111,13 @@ export async function uploadAvatar(
           fileName,
           contentType,
           folder: 'avatars',
+          fileSize: arrayBuffer.byteLength,
         },
       },
     );
 
     if (uploadUrlError) {
-      throw uploadUrlError;
+      throw await toFunctionError(uploadUrlError);
     }
 
     if (

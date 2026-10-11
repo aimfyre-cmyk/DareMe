@@ -37,6 +37,10 @@ import {
 
 import { colors } from '../constants/theme';
 
+import { getLocalFileSize } from '../lib/fileSize';
+
+import { toFunctionError } from '../lib/functionError';
+
 import { supabase } from '../lib/supabase';
 
 type ShotType = 'voice' | 'video' | 'mystery';
@@ -1027,6 +1031,8 @@ export function DareShotPanel({ targetUserId, shotId, onClose }: DareShotPanelPr
 
   ) => {
 
+    const fileSize = await getLocalFileSize(uri);
+
     const { data, error: uploadUrlError } =
 
       await supabase.functions.invoke('r2-upload-url', {
@@ -1039,11 +1045,13 @@ export function DareShotPanel({ targetUserId, shotId, onClose }: DareShotPanelPr
 
           folder: 'private-shots',
 
+          fileSize,
+
         },
 
       });
 
-    if (uploadUrlError) throw uploadUrlError;
+    if (uploadUrlError) throw await toFunctionError(uploadUrlError);
 
     const uploadData = data as R2UploadResponse | null;
 
@@ -1090,10 +1098,11 @@ export function DareShotPanel({ targetUserId, shotId, onClose }: DareShotPanelPr
   };
 
   const uploadVideoToR2 = async (uri: string, fileName: string, contentType: string) => {
+    const fileSize = await getLocalFileSize(uri);
     const { data, error: uploadUrlError } = await supabase.functions.invoke('r2-upload-url', {
-      body: { fileName, contentType, folder: 'private-shots' },
+      body: { fileName, contentType, folder: 'private-shots', fileSize },
     });
-    if (uploadUrlError) throw uploadUrlError;
+    if (uploadUrlError) throw await toFunctionError(uploadUrlError);
     const uploadData = data as R2UploadResponse | null;
     if (!uploadData?.success || !uploadData.uploadUrl || !uploadData.key) {
       throw new Error(uploadData?.error ?? 'Unable to create video upload URL.');

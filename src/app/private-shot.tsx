@@ -153,6 +153,22 @@ import { colors } from '../constants/theme';
 
 
 
+import { getLocalFileSize } from '../lib/fileSize';
+
+
+
+
+
+
+
+import { toFunctionError } from '../lib/functionError';
+
+
+
+
+
+
+
 import { supabase } from '../lib/supabase';
 
 
@@ -4191,6 +4207,14 @@ const requestRecordingPermissions = async (
 
 
 
+    const fileSize = await getLocalFileSize(uri);
+
+
+
+
+
+
+
     const { data, error: uploadUrlError } =
 
 
@@ -4239,6 +4263,14 @@ const requestRecordingPermissions = async (
 
 
 
+          fileSize,
+
+
+
+
+
+
+
         },
 
 
@@ -4255,7 +4287,7 @@ const requestRecordingPermissions = async (
 
 
 
-    if (uploadUrlError) throw uploadUrlError;
+    if (uploadUrlError) throw await toFunctionError(uploadUrlError);
 
 
 
@@ -4443,11 +4475,15 @@ const requestRecordingPermissions = async (
 
 
 
+    const fileSize = await getLocalFileSize(uri);
+
+
+
     const { data, error: uploadUrlError } = await supabase.functions.invoke('r2-upload-url', {
 
 
 
-      body: { fileName, contentType, folder: 'private-shots' },
+      body: { fileName, contentType, folder: 'private-shots', fileSize },
 
 
 
@@ -4455,7 +4491,7 @@ const requestRecordingPermissions = async (
 
 
 
-    if (uploadUrlError) throw uploadUrlError;
+    if (uploadUrlError) throw await toFunctionError(uploadUrlError);
 
 
 

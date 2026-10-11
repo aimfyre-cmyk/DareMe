@@ -9,3 +9,10 @@ entrypoint = "./functions/transition-dare/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/transition-dare/*.html" ]
+
+[functions.r2-upload-url]
+enabled = true
+# Auth is enforced inside the function via withSupabase({ auth: "user" }).
+verify_jwt = false
+import_map = "./functions/r2-upload-url/deno.json"
+entrypoint = "./functions/r2-upload-url/index.ts"
