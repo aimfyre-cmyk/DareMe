@@ -5264,87 +5264,115 @@ function PostCard({
 
 
 
-        <Pressable
+        {/* Sibling Pressables: nesting them renders <button> inside <button> on web. */}
 
 
 
-          style={styles.actionButton}
+        <View style={styles.actionButton}>
 
 
 
-          onPress={onLike}
+          <Pressable
 
 
 
-          accessibilityRole="button"
+            onPress={onLike}
 
 
 
-          accessibilityLabel={
+            hitSlop={{
 
 
 
-            post.likedByMe
+              top: spacing.xs,
 
 
 
-              ? 'Unlike post'
+              bottom: spacing.xs,
 
 
 
-              : 'Like post'
+              left: spacing.sm,
 
 
 
-          }
+            }}
 
 
 
-       >
+            accessibilityRole="button"
 
 
 
-          <Text
+            accessibilityLabel={
 
 
 
-            style={[
+              post.likedByMe
 
 
 
-              styles.actionIcon,
+                ? 'Unlike post'
 
 
 
-              post.likedByMe &&
+                : 'Like post'
 
 
 
-                styles.likedIcon,
+            }
 
 
 
-            ]}
+          >
 
 
 
-         >
+            <Text
 
 
 
-            {post.likedByMe
+              style={[
 
 
 
-              ? '♥'
+                styles.actionIcon,
 
 
 
-              : '♡'}
+                post.likedByMe &&
 
 
 
-          </Text>
+                  styles.likedIcon,
+
+
+
+              ]}
+
+
+
+            >
+
+
+
+              {post.likedByMe
+
+
+
+                ? '♥'
+
+
+
+                : '♡'}
+
+
+
+            </Text>
+
+
+
+          </Pressable>
 
 
 
@@ -5360,15 +5388,31 @@ function PostCard({
 
                 ? onLikeCountPress
 
-                : undefined
+                : onLike
 
             }
 
-            disabled={post.likeCount === 0}
+            hitSlop={{
+
+              top: spacing.xs,
+
+              bottom: spacing.xs,
+
+              right: spacing.sm,
+
+            }}
 
             accessibilityRole="button"
 
-            accessibilityLabel="View people who liked this post"
+            accessibilityLabel={
+
+              post.likeCount > 0
+
+                ? 'View people who liked this post'
+
+                : 'Like post'
+
+            }
 
           >
 
@@ -5398,7 +5442,7 @@ function PostCard({
 
 
 
-        </Pressable>
+        </View>
 
 
 
