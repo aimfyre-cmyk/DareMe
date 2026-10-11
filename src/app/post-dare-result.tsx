@@ -27,6 +27,7 @@ import {
     spacing,
 } from '../constants/theme';
 
+import { toFunctionError } from '../lib/functionError';
 import { supabase } from '../lib/supabase';
 
 type MediaKind = 'image' | 'video';
@@ -470,12 +471,13 @@ export default function PostDareResultScreen() {
           body: {
             fileName: storagePath,
             contentType,
+            fileSize: arrayBuffer.byteLength,
           },
         },
       );
 
       if (uploadUrlError) {
-        throw uploadUrlError;
+        throw await toFunctionError(uploadUrlError);
       }
 
       if (

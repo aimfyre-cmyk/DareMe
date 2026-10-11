@@ -1,98 +1,103 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import "@supabase/functions-js/edge-runtime.d.ts";
+import { withSupabase } from "@supabase/server";
 
-import {
-  PutObjectCommand,
-  S3Client,
-} from "npm:@aws-sdk/client-s3";
+import { PutObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@3.1149.0";
 
-import {
-  getSignedUrl,
-} from "npm:@aws-sdk/s3-request-presigner";
+import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@3.1149.0";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods":
-    "POST, OPTIONS",
-};
+/*
+ * Clients that send fileSize get a URL locked to that exact byte size
+ * and content type. While this is false, older clients that do not send
+ * fileSize yet still get a URL (login is still required) but without
+ * the size/type lock. Flip to true once every client sends fileSize.
+ */
+const REQUIRE_FILE_SIZE = false;
+
+const MB = 1024 * 1024;
+
+// Max bytes a single presigned upload may write, per media kind.
+const MAX_UPLOAD_BYTES = {
+  image: 50 * MB,
+  video: 500 * MB,
+  audio: 100 * MB,
+} as const;
+
+type MediaKind = keyof typeof MAX_UPLOAD_BYTES;
 
 type UploadFolder =
   | "posts"
   | "avatars"
   | "dares";
 
-const allowedTypes = new Set([
+// Allowed content types, their size class, and the extension used when
+// the client's file name does not carry a known extension.
+const ALLOWED_TYPES: Record<string, { kind: MediaKind; extension: string }> = {
   // Images
-  "image/jpeg",
-  "image/png",
-  "image/webp",
+  "image/jpeg": { kind: "image", extension: "jpg" },
+  "image/png": { kind: "image", extension: "png" },
+  "image/webp": { kind: "image", extension: "webp" },
 
   // Videos
-  "video/mp4",
-  "video/quicktime",
-  "video/webm",
+  "video/mp4": { kind: "video", extension: "mp4" },
+  "video/quicktime": { kind: "video", extension: "mov" },
+  "video/webm": { kind: "video", extension: "webm" },
 
   // Audio / Music
-  "audio/m4a",
-  "audio/mp4",
-  "audio/webm",
-  "audio/aac",
-  "audio/mpeg",
-  "audio/mp3",
-  "audio/x-m4a",
-  "audio/wav",
-  "audio/x-wav",
-  "audio/ogg",
-]);
+  "audio/m4a": { kind: "audio", extension: "m4a" },
+  "audio/mp4": { kind: "audio", extension: "m4a" },
+  "audio/webm": { kind: "audio", extension: "webm" },
+  "audio/aac": { kind: "audio", extension: "aac" },
+  "audio/mpeg": { kind: "audio", extension: "mp3" },
+  "audio/mp3": { kind: "audio", extension: "mp3" },
+  "audio/x-m4a": { kind: "audio", extension: "m4a" },
+  "audio/wav": { kind: "audio", extension: "wav" },
+  "audio/x-wav": { kind: "audio", extension: "wav" },
+  "audio/ogg": { kind: "audio", extension: "ogg" },
+};
 
-function jsonResponse(
-  body: Record<string, unknown>,
-  status = 200,
-) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      ...corsHeaders,
-      "Content-Type": "application/json",
-    },
-  });
+// A client-supplied extension is kept only when it matches the kind
+// of the declared content type (no 500 MB video stored as ".png").
+const EXTENSION_KINDS: Record<string, MediaKind> = {
+  jpg: "image",
+  jpeg: "image",
+  png: "image",
+  webp: "image",
+  mp4: "video",
+  mov: "video",
+  webm: "video",
+  m4a: "audio",
+  aac: "audio",
+  mp3: "audio",
+  wav: "audio",
+  ogg: "audio",
+};
+
+const UPLOAD_URL_TTL_SECONDS = 60 * 10;
+
+type UploadRequest = {
+  fileName?: unknown;
+  contentType?: unknown;
+  folder?: unknown;
+  fileSize?: unknown;
+};
+
+function errorResponse(error: string, status: number) {
+  return Response.json(
+    { success: false, error },
+    { status },
+  );
 }
 
-function getExtension(fileName: string, contentType: string) {
-  const originalExtension =
-    fileName.split(".").pop()?.toLowerCase();
+function getExtension(
+  fileName: string,
+  typeInfo: { kind: MediaKind; extension: string },
+) {
+  const requested = fileName.split(".").pop()?.toLowerCase() ?? "";
 
-  if (
-    originalExtension &&
-    originalExtension.length <= 10 &&
-    /^[a-z0-9]+$/.test(originalExtension)
-  ) {
-    return originalExtension;
-  }
-
-  const mimeExtensions: Record<string, string> = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/webp": "webp",
-
-    "video/mp4": "mp4",
-    "video/quicktime": "mov",
-    "video/webm": "webm",
-
-    "audio/m4a": "m4a",
-    "audio/mp4": "m4a",
-    "audio/webm": "webm",
-    "audio/aac": "aac",
-    "audio/mpeg": "mp3",
-    "audio/mp3": "mp3",
-    "audio/x-m4a": "m4a",
-    "audio/wav": "wav",
-    "audio/x-wav": "wav",
-    "audio/ogg": "ogg",
-  };
-
-  return mimeExtensions[contentType] || "bin";
+  return Object.hasOwn(EXTENSION_KINDS, requested) &&
+      EXTENSION_KINDS[requested] === typeInfo.kind
+    ? requested
+    : typeInfo.extension;
 }
 
 function resolveFolder(
@@ -108,8 +113,7 @@ function resolveFolder(
     return requestedFolder;
   }
 
-  // Existing DareMe Create Dare code sends paths containing /dares/
-  // but currently does not send a folder value.
+  // Create Dare code sends paths containing /dares/ without a folder value.
   if (
     fileName.includes("/dares/") ||
     fileName.includes("\\dares\\")
@@ -129,145 +133,155 @@ function resolveFolder(
   return "posts";
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      status: 200,
-      headers: corsHeaders,
-    });
-  }
+export default {
+  fetch: withSupabase(
+    { auth: "user", errors: { detailed: false } },
+    async (req, ctx) => {
+      if (req.method !== "POST") {
+        return errorResponse("Method not allowed", 405);
+      }
 
-  if (req.method !== "POST") {
-    return jsonResponse(
-      {
-        success: false,
-        error: "Method not allowed",
-      },
-      405,
-    );
-  }
+      const userId = ctx.userClaims?.id;
 
-  try {
-    const body = await req.json();
+      if (!userId) {
+        return errorResponse("Authenticated user not found", 401);
+      }
 
-    const fileName =
-      typeof body?.fileName === "string"
-        ? body.fileName.trim()
-        : "";
+      try {
+        const body = (await req.json().catch(() => null)) as
+          | UploadRequest
+          | null;
 
-    const contentType =
-      typeof body?.contentType === "string"
-        ? body.contentType.trim().toLowerCase()
-        : "";
+        const fileName = typeof body?.fileName === "string"
+          ? body.fileName.trim()
+          : "";
 
-    const requestedFolder = body?.folder;
+        // Signed as-is: it must equal the Content-Type header the client
+        // sends on the PUT. The lowercased form is only used for lookup.
+        const contentType = typeof body?.contentType === "string"
+          ? body.contentType.trim()
+          : "";
+        const normalizedType = contentType.toLowerCase();
 
-    if (!fileName || !contentType) {
-      return jsonResponse(
-        {
-          success: false,
-          error: "fileName and contentType are required",
-        },
-        400,
-      );
-    }
+        if (!fileName || !contentType) {
+          return errorResponse("fileName and contentType are required", 400);
+        }
 
-    if (!allowedTypes.has(contentType)) {
-      return jsonResponse(
-        {
-          success: false,
-          error: `Unsupported media type: ${contentType}`,
-        },
-        400,
-      );
-    }
+        // Own-property lookup only: "constructor", "toString" etc. must not
+        // resolve to Object.prototype members and skip the size limit.
+        const typeInfo = Object.hasOwn(ALLOWED_TYPES, normalizedType)
+          ? ALLOWED_TYPES[normalizedType]
+          : undefined;
 
-    const accessKey = Deno.env.get("R2_ACCESS_KEY_ID");
-    const secretKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
-    const endpoint = Deno.env.get("R2_ENDPOINT");
-    const bucket = Deno.env.get("R2_BUCKET_NAME");
+        if (!typeInfo) {
+          return errorResponse(
+            `Unsupported media type: ${normalizedType}`,
+            400,
+          );
+        }
 
-    if (
-      !accessKey ||
-      !secretKey ||
-      !endpoint ||
-      !bucket
-    ) {
-      throw new Error("R2 configuration is missing");
-    }
+        let fileSize: number | null = null;
 
-    const client = new S3Client({
-      region: "auto",
-      endpoint,
-      credentials: {
-        accessKeyId: accessKey,
-        secretAccessKey: secretKey,
-      },
-    });
+        if (body?.fileSize !== undefined && body?.fileSize !== null) {
+          if (
+            typeof body.fileSize !== "number" ||
+            !Number.isSafeInteger(body.fileSize) ||
+            body.fileSize <= 0
+          ) {
+            return errorResponse(
+              "fileSize must be the exact file size in bytes",
+              400,
+            );
+          }
 
-    const folder = resolveFolder(
-      requestedFolder,
-      fileName,
-    );
+          fileSize = body.fileSize;
+        } else if (REQUIRE_FILE_SIZE) {
+          return errorResponse(
+            "fileSize is required. Please update the app.",
+            400,
+          );
+        }
 
-    const extension = getExtension(
-      fileName,
-      contentType,
-    );
+        const maxBytes = MAX_UPLOAD_BYTES[typeInfo.kind];
 
-    /*
-     * Keep the R2 key simple and safe.
-     *
-     * Existing behavior:
-     *   posts/<uuid>.<ext>
-     *   avatars/<uuid>.<ext>
-     *
-     * New Dare behavior:
-     *   dares/<uuid>.<ext>
-     *
-     * The original fileName is intentionally NOT used directly
-     * as an R2 key so user supplied paths cannot create unsafe
-     * object paths.
-     */
-    const key =
-      `${folder}/${crypto.randomUUID()}.${extension}`;
+        if (fileSize !== null && fileSize > maxBytes) {
+          return errorResponse(
+            `File is too large. Max ${maxBytes / MB} MB for ${typeInfo.kind}.`,
+            413,
+          );
+        }
 
-    const command = new PutObjectCommand({
-      Bucket: bucket,
-      Key: key,
-      ContentType: contentType,
-    });
+        const accessKey = Deno.env.get("R2_ACCESS_KEY_ID");
+        const secretKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
+        const endpoint = Deno.env.get("R2_ENDPOINT");
+        const bucket = Deno.env.get("R2_BUCKET_NAME");
 
-    const uploadUrl = await getSignedUrl(
-      client,
-      command,
-      {
-        expiresIn: 60 * 10,
-      },
-    );
+        if (!accessKey || !secretKey || !endpoint || !bucket) {
+          console.error("R2 configuration is missing");
+          return errorResponse("Upload service is not configured", 500);
+        }
 
-    return jsonResponse({
-      success: true,
-      uploadUrl,
-      key,
-      contentType,
-      folder,
-    });
-  } catch (error) {
-    console.error(
-      "R2 presigned URL error:",
-      error,
-    );
+        const client = new S3Client({
+          region: "auto",
+          endpoint,
+          credentials: {
+            accessKeyId: accessKey,
+            secretAccessKey: secretKey,
+          },
+          // SDK >= 3.729 otherwise signs an empty-body CRC32 checksum into
+          // presigned PUT URLs, which breaks real uploads on R2.
+          requestChecksumCalculation: "WHEN_REQUIRED",
+          responseChecksumValidation: "WHEN_REQUIRED",
+        });
 
-    return jsonResponse(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : String(error),
-      },
-      500,
-    );
-  }
-});
+        const folder = resolveFolder(body?.folder, fileName);
+        const extension = getExtension(fileName, typeInfo);
+
+        /*
+         * The client's fileName is never used as the key, so user supplied
+         * paths cannot create or overwrite arbitrary objects.
+         */
+        const key = `${folder}/${crypto.randomUUID()}.${extension}`;
+
+        const command = new PutObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          ContentType: contentType,
+          ...(fileSize !== null ? { ContentLength: fileSize } : {}),
+        });
+
+        // With a declared size, Content-Length and Content-Type are signed
+        // into the URL, so the upload must match them exactly.
+        const uploadUrl = await getSignedUrl(
+          client,
+          command,
+          {
+            expiresIn: UPLOAD_URL_TTL_SECONDS,
+            ...(fileSize !== null
+              ? { signableHeaders: new Set(["content-length", "content-type"]) }
+              : {}),
+          },
+        );
+
+        console.log("R2 upload URL issued", {
+          userId,
+          key,
+          contentType: normalizedType,
+          fileSize,
+        });
+
+        return Response.json({
+          success: true,
+          uploadUrl,
+          key,
+          contentType: normalizedType,
+          folder,
+        });
+      } catch (error) {
+        console.error("R2 presigned URL error:", error);
+
+        return errorResponse("Unable to create upload URL", 500);
+      }
+    },
+  ),
+};

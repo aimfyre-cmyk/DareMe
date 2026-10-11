@@ -48,6 +48,8 @@ import {
 
 import { discoverCategories } from '../../data/mockDares';
 
+import { toFunctionError } from '../../lib/functionError';
+
 import { supabase } from '../../lib/supabase';
 
 const visibilities = [
@@ -1499,6 +1501,8 @@ async function uploadDareAssetToR2({
 
         contentType,
 
+        fileSize: arrayBuffer.byteLength,
+
       },
 
     },
@@ -1507,7 +1511,7 @@ async function uploadDareAssetToR2({
 
   if (uploadUrlError) {
 
-    throw uploadUrlError;
+    throw await toFunctionError(uploadUrlError);
 
   }
 

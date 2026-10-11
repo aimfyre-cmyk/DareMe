@@ -35,6 +35,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getR2MediaUrl } from '@/features/onboarding/profileService';
 
 import { colors, fontSize, spacing } from '../constants/theme';
+import { getLocalFileSize } from '../lib/fileSize';
+import { toFunctionError } from '../lib/functionError';
 import { supabase } from '../lib/supabase';
 import PrivateShotScreen from './private-shot';
 
@@ -175,10 +177,11 @@ function FullscreenVideo({ uri }: { uri: string }) {
 
 
 async function uploadToR2(uri: string, fileName: string, contentType: string) {
+  const fileSize = await getLocalFileSize(uri);
   const { data, error } = await supabase.functions.invoke('r2-upload-url', {
-    body: { fileName, contentType, folder: 'posts' },
+    body: { fileName, contentType, folder: 'posts', fileSize },
   });
-  if (error) throw error;
+  if (error) throw await toFunctionError(error);
   const signedUrl = data?.uploadUrl as string | undefined;
   const key = data?.key as string | undefined;
   if (!signedUrl || !key) throw new Error('R2 upload URL was not returned.');
