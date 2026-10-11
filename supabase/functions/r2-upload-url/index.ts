@@ -274,7 +274,8 @@ export default {
           success: true,
           uploadUrl,
           key,
-          contentType: normalizedType,
+          // The exact value signed into the URL; the PUT must send this.
+          contentType,
           folder,
         });
       } catch (error) {
