@@ -1,164 +1,112 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+import "@supabase/functions-js/edge-runtime.d.ts";
+import { withSupabase } from "@supabase/server";
 
-import {
-    GetObjectCommand,
-    S3Client,
-} from "npm:@aws-sdk/client-s3";
+import { GetObjectCommand, S3Client } from "npm:@aws-sdk/client-s3@3.1149.0";
 
-import {
-    getSignedUrl,
-} from "npm:@aws-sdk/s3-request-presigner";
+import { getSignedUrl } from "npm:@aws-sdk/s3-request-presigner@3.1149.0";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods":
-    "POST, OPTIONS",
-};
+/*
+ * Signed playback URL lifetime.
+ *
+ * 1 hour is enough for feed playback and
+ * avoids unnecessarily long-lived URLs.
+ */
+const MEDIA_URL_TTL_SECONDS = 60 * 60;
 
-function jsonResponse(
-  body: Record<string, unknown>,
-  status = 200,
-) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      ...corsHeaders,
-      "Content-Type": "application/json",
-    },
-  });
+// S3/R2 object keys are at most 1024 bytes.
+const MAX_KEY_LENGTH = 1024;
+
+function errorResponse(error: string, status: number) {
+  return Response.json(
+    { success: false, error },
+    { status },
+  );
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", {
-      status: 200,
-      headers: corsHeaders,
-    });
-  }
+function isValidObjectKey(key: string) {
+  /*
+   * Never allow arbitrary URL generation.
+   * Only R2 object keys are accepted.
+   */
+  return key.length <= MAX_KEY_LENGTH &&
+    !key.startsWith("/") &&
+    !key.startsWith("http://") &&
+    !key.startsWith("https://") &&
+    !key.includes("..") &&
+    // deno-lint-ignore no-control-regex
+    !/[\u0000-\u001f\u007f]/.test(key);
+}
 
-  if (req.method !== "POST") {
-    return jsonResponse(
-      {
-        success: false,
-        error: "Method not allowed",
-      },
-      405,
-    );
-  }
+export default {
+  fetch: withSupabase(
+    { auth: "user", errors: { detailed: false } },
+    async (req, ctx) => {
+      if (req.method !== "POST") {
+        return errorResponse("Method not allowed", 405);
+      }
 
-  try {
-    const body = await req.json();
+      if (!ctx.userClaims?.id) {
+        return errorResponse("Authenticated user not found", 401);
+      }
 
-    const key =
-      typeof body?.key === "string"
-        ? body.key.trim()
-        : "";
+      try {
+        const body = await req.json().catch(() => null);
 
-    if (!key) {
-      return jsonResponse(
-        {
-          success: false,
-          error: "key is required",
-        },
-        400,
-      );
-    }
+        const key = typeof body?.key === "string" ? body.key.trim() : "";
 
-    /*
-     * Never allow arbitrary URL generation.
-     * Only R2 object keys are accepted.
-     */
-    if (
-      key.startsWith("http://") ||
-      key.startsWith("https://") ||
-      key.includes("..")
-    ) {
-      return jsonResponse(
-        {
-          success: false,
-          error: "Invalid R2 object key",
-        },
-        400,
-      );
-    }
+        if (!key) {
+          return errorResponse("key is required", 400);
+        }
 
-    const accessKey = Deno.env.get(
-      "R2_ACCESS_KEY_ID",
-    );
+        if (!isValidObjectKey(key)) {
+          return errorResponse("Invalid R2 object key", 400);
+        }
 
-    const secretKey = Deno.env.get(
-      "R2_SECRET_ACCESS_KEY",
-    );
+        const accessKey = Deno.env.get("R2_ACCESS_KEY_ID");
+        const secretKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
+        const endpoint = Deno.env.get("R2_ENDPOINT");
+        const bucket = Deno.env.get("R2_BUCKET_NAME");
 
-    const endpoint = Deno.env.get(
-      "R2_ENDPOINT",
-    );
+        if (!accessKey || !secretKey || !endpoint || !bucket) {
+          console.error("R2 configuration is missing");
+          return errorResponse("Media service is not configured", 500);
+        }
 
-    const bucket = Deno.env.get(
-      "R2_BUCKET_NAME",
-    );
+        const client = new S3Client({
+          region: "auto",
+          endpoint,
+          credentials: {
+            accessKeyId: accessKey,
+            secretAccessKey: secretKey,
+          },
+          // Keep presigned GETs free of SDK checksum query params.
+          requestChecksumCalculation: "WHEN_REQUIRED",
+          responseChecksumValidation: "WHEN_REQUIRED",
+        });
 
-    if (
-      !accessKey ||
-      !secretKey ||
-      !endpoint ||
-      !bucket
-    ) {
-      throw new Error(
-        "R2 configuration is missing",
-      );
-    }
+        const command = new GetObjectCommand({
+          Bucket: bucket,
+          Key: key,
+        });
 
-    const client = new S3Client({
-      region: "auto",
-      endpoint,
-      credentials: {
-        accessKeyId: accessKey,
-        secretAccessKey: secretKey,
-      },
-    });
+        const signedUrl = await getSignedUrl(
+          client,
+          command,
+          {
+            expiresIn: MEDIA_URL_TTL_SECONDS,
+          },
+        );
 
-    const command = new GetObjectCommand({
-      Bucket: bucket,
-      Key: key,
-    });
+        return Response.json({
+          success: true,
+          signedUrl,
+          key,
+        });
+      } catch (error) {
+        console.error("R2 media URL error:", error);
 
-    /*
-     * Signed playback URL.
-     *
-     * 1 hour is enough for feed playback and
-     * avoids unnecessarily long-lived URLs.
-     */
-    const signedUrl = await getSignedUrl(
-      client,
-      command,
-      {
-        expiresIn: 60 * 60,
-      },
-    );
-
-    return jsonResponse({
-      success: true,
-      signedUrl,
-      key,
-    });
-  } catch (error) {
-    console.error(
-      "R2 media URL error:",
-      error,
-    );
-
-    return jsonResponse(
-      {
-        success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : String(error),
-      },
-      500,
-    );
-  }
-});
+        return errorResponse("Unable to create media URL", 500);
+      }
+    },
+  ),
+};
