@@ -16,3 +16,10 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/r2-upload-url/deno.json"
 entrypoint = "./functions/r2-upload-url/index.ts"
+
+[functions.r2-media-url]
+enabled = true
+# Auth is enforced inside the function via withSupabase({ auth: "user" }).
+verify_jwt = false
+import_map = "./functions/r2-media-url/deno.json"
+entrypoint = "./functions/r2-media-url/index.ts"
