@@ -9,8 +9,12 @@ export async function toFunctionError(error: unknown): Promise<Error> {
   if (error instanceof FunctionsHttpError) {
     const body = await error.context.json().catch(() => null);
 
-    if (typeof body?.error === 'string' && body.error) {
-      return new Error(body.error);
+    // Handler errors use `error`; the auth gate (e.g. expired session)
+    // responds with `message`.
+    const message = body?.error || body?.message;
+
+    if (typeof message === 'string' && message) {
+      return new Error(message);
     }
   }
 
