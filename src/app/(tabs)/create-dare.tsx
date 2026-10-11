@@ -50,6 +50,13 @@ import { discoverCategories } from '../../data/mockDares';
 
 import { toFunctionError } from '../../lib/functionError';
 
+import {
+  getUploadKind,
+  MAX_UPLOAD_BYTES,
+  MB,
+  type UploadKind,
+} from '../../constants/uploadLimits';
+
 import { supabase } from '../../lib/supabase';
 
 const visibilities = [
@@ -326,6 +333,24 @@ export default function CreateScreen() {
 
       const isVideo = asset.type === 'video';
 
+      const invalidMedia = validateDareAsset({
+
+        kind: isVideo ? 'video' : 'image',
+
+        mimeType: asset.mimeType,
+
+        size: getPickedFileSize(asset.uri, asset.fileSize),
+
+      });
+
+      if (invalidMedia) {
+
+        Alert.alert(invalidMedia.title, invalidMedia.message);
+
+        return;
+
+      }
+
       setMedia({
 
         uri: asset.uri,
@@ -387,6 +412,24 @@ export default function CreateScreen() {
       }
 
       const asset = result.assets[0];
+
+      const invalidMusic = validateDareAsset({
+
+        kind: 'audio',
+
+        mimeType: asset.mimeType,
+
+        size: getPickedFileSize(asset.uri, asset.size),
+
+      });
+
+      if (invalidMusic) {
+
+        Alert.alert(invalidMusic.title, invalidMusic.message);
+
+        return;
+
+      }
 
       setMusic({
 
@@ -622,6 +665,40 @@ export default function CreateScreen() {
 
       /* =====================================================
 
+         UPLOAD MUSIC TO CLOUDFLARE R2
+
+         Music goes first: it is small, so if the media upload
+
+         fails afterwards only a small object is left behind.
+
+         ===================================================== */
+
+      if (music) {
+
+        uploadedMusicKey = await uploadDareAssetToR2({
+
+          userId: user.id,
+
+          dareId,
+
+          uri: music.uri,
+
+          fileName: music.name,
+
+          mimeType: music.mimeType,
+
+          kind: 'audio',
+
+          assetName: 'music',
+
+        });
+
+      }
+
+
+
+      /* =====================================================
+
          UPLOAD DARE MEDIA TO CLOUDFLARE R2
 
          Upload first so the R2 key can be written directly into
@@ -649,36 +726,6 @@ export default function CreateScreen() {
           kind: media.type,
 
           assetName: 'media',
-
-        });
-
-      }
-
-
-
-      /* =====================================================
-
-         UPLOAD MUSIC TO CLOUDFLARE R2
-
-         ===================================================== */
-
-      if (music) {
-
-        uploadedMusicKey = await uploadDareAssetToR2({
-
-          userId: user.id,
-
-          dareId,
-
-          uri: music.uri,
-
-          fileName: music.name,
-
-          mimeType: music.mimeType,
-
-          kind: 'audio',
-
-          assetName: 'music',
 
         });
 
@@ -1656,6 +1703,128 @@ function getDareFileExtension(
   return 'jpg';
 
 }
+
+function getDareDefaultContentType(kind: UploadKind): string {
+
+  // Same defaults uploadDareAssetToR2 uses when the picker gives no MIME type.
+
+  return kind === 'audio'
+
+    ? 'audio/mpeg'
+
+    : kind === 'video'
+
+      ? 'video/mp4'
+
+      : 'image/jpeg';
+
+}
+
+
+
+function getPickedFileSize(
+
+  uri: string,
+
+  reportedSize?: number | null,
+
+): number | null {
+
+  // On native, measure the file on disk: those are the bytes that get
+
+  // uploaded (the picker can report the original file's size instead).
+
+  if (Platform.OS !== 'web') {
+
+    try {
+
+      const file = new File(uri);
+
+      if (file.exists && file.size > 0) return file.size;
+
+    } catch {
+
+      // Fall back to the size the picker reported.
+
+    }
+
+  }
+
+  return typeof reportedSize === 'number' && reportedSize > 0
+
+    ? reportedSize
+
+    : null;
+
+}
+
+
+
+function validateDareAsset({
+
+  kind,
+
+  mimeType,
+
+  size,
+
+}: {
+
+  kind: UploadKind;
+
+  mimeType?: string | null;
+
+  size: number | null;
+
+}): { title: string; message: string } | null {
+
+  // Mirrors r2-upload-url so a bad file is rejected right after picking.
+
+  if (getUploadKind(mimeType || getDareDefaultContentType(kind)) !== kind) {
+
+    return {
+
+      title: 'Unsupported file',
+
+      message:
+
+        kind === 'audio'
+
+          ? 'Please choose an MP3, M4A, AAC, WAV or OGG audio file.'
+
+          : kind === 'video'
+
+            ? 'Please choose an MP4, MOV or WebM video.'
+
+            : 'Please choose a JPG, PNG or WebP photo.',
+
+    };
+
+  }
+
+  const maxBytes = MAX_UPLOAD_BYTES[kind];
+
+  if (size !== null && size > maxBytes) {
+
+    const label =
+
+      kind === 'audio' ? 'music file' : kind === 'video' ? 'video' : 'photo';
+
+    return {
+
+      title: 'File too large',
+
+      message: `Please choose a ${label} smaller than ${maxBytes / MB} MB.`,
+
+    };
+
+  }
+
+  return null;
+
+}
+
+
 
 function SelectableChip({
 
