@@ -52,6 +52,9 @@ const ALLOWED_TYPES: Record<string, { kind: MediaKind; extension: string }> = {
   "audio/x-m4a": { kind: "audio", extension: "m4a" },
   "audio/wav": { kind: "audio", extension: "wav" },
   "audio/x-wav": { kind: "audio", extension: "wav" },
+  // iOS reports .wav as audio/vnd.wave (UTType preferredMIMEType).
+  "audio/vnd.wave": { kind: "audio", extension: "wav" },
+  "audio/wave": { kind: "audio", extension: "wav" },
   "audio/ogg": { kind: "audio", extension: "ogg" },
 };
 
