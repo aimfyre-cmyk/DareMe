@@ -428,6 +428,12 @@ export async function getR2MediaUrl(
     return null;
   }
 
+  // Older avatars are stored as full Supabase Storage URLs, not R2 keys.
+  // r2-media-url rejects http(s) values, so use them as-is.
+  if (/^https?:\/\//i.test(key.trim())) {
+    return key.trim();
+  }
+
   try {
     const {
       data,
