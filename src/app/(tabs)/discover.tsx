@@ -1,7 +1,3 @@
-import { useEvent } from 'expo';
-
-
-
 import {
   useFocusEffect,
 
@@ -13,10 +9,6 @@ import {
 
 
 
-
-
-
-import { VideoView, useVideoPlayer } from 'expo-video';
 
 
 
@@ -132,6 +124,7 @@ import { transitionDare } from '../../lib/dareTransitions';
 
 
 
+import { FeedVideo } from '../../components/FeedVideo';
 import { supabase } from '../../lib/supabase';
 
 
@@ -202,7 +195,7 @@ type SocialPost = {
 
   post_type: string;
 
-  dare_id: string | null;
+
 
   content: string | null;
 
@@ -215,6 +208,10 @@ type SocialPost = {
   media_type: string | null;
 
 
+
+  
+  // NULL = normal post, UUID = Dare completion post.
+  dare_id: string | null;
 
   visibility: string;
 
@@ -366,6 +363,12 @@ type FeedPost = SocialPost & {
 
 
   commentCount: number;
+
+  postKind: 'normal' | 'dare_completion';
+
+  dareTitle?: string | null;
+
+
 
 
 
@@ -527,7 +530,7 @@ function mapDare(dare: RealDare): MockDare {
 
 export default function DiscoverScreen() {
 
-const router = useRouter();
+
 
   const [posts, setPosts] = useState<FeedPost[]>([]);
 
@@ -567,11 +570,58 @@ const router = useRouter();
 
   const [screenFocused, setScreenFocused] = useState(true);
 
+  const [activeVideoPostId, setActiveVideoPostId] = useState<string | null>(null);
+  const postLayoutsRef = useRef<Record<string, { y: number; height: number }>>({});
+  const activeVideoPostIdRef = useRef<string | null>(null);
+  const feedOffsetYRef = useRef(0);
 
 
 
 
 
+
+
+  const recomputeActiveVideoPost = useCallback((nextScrollY: number) => {
+    if (!screenFocused) {
+      if (activeVideoPostIdRef.current !== null) {
+        activeVideoPostIdRef.current = null;
+        setActiveVideoPostId(null);
+      }
+      return;
+    }
+
+    const viewportHeight = Dimensions.get('window').height;
+    if (viewportHeight <= 0) return;
+
+    let bestId: string | null = null;
+    let bestRatio = 0;
+
+    for (const post of posts) {
+      if (post.media_type !== 'video') continue;
+      const layout = postLayoutsRef.current[post.id];
+      if (!layout || layout.height <= 0) continue;
+
+      const top = layout.y - nextScrollY;
+      const bottom = top + layout.height;
+      const visibleHeight = Math.max(0, Math.min(bottom, viewportHeight) - Math.max(top, 0));
+      const ratio = visibleHeight / layout.height;
+
+      if (ratio >= 0.5 && ratio > bestRatio) {
+        bestRatio = ratio;
+        bestId = post.id;
+      }
+    }
+
+    if (activeVideoPostIdRef.current !== bestId) {
+      activeVideoPostIdRef.current = bestId;
+      setActiveVideoPostId(bestId);
+    }
+  }, [posts, screenFocused]);
+
+  const handlePostLayout = useCallback((postId: string, y: number, height: number) => {
+    postLayoutsRef.current[postId] = { y: feedOffsetYRef.current + y, height };
+    recomputeActiveVideoPost(scrollY);
+  }, [recomputeActiveVideoPost, scrollY]);
 
   const [commentPost, setCommentPost] =
 
@@ -854,12 +904,11 @@ const router = useRouter();
 
 
 
-        
+        .select(
 
 
 
-          .select(
-  'id,user_id,post_type,content,media_url,media_type,dare_id,visibility,status,created_at',
+          'id,user_id,post_type,content,media_url,media_type,dare_id,visibility,status,created_at',
 
 
 
@@ -919,90 +968,7 @@ const router = useRouter();
 
 
 
-      
-      // =====================================================
-      // DARE POST BACKFILL
-      // Existing Dare proof posts may have a null posts.dare_id.
-      // Their dare_proofs.storage_path is linked as post:<postId>.
-      // Recover the Dare id without changing normal posts.
-      // =====================================================
-      const postsMissingDareId = socialPosts.filter(
-        (post) => !post.dare_id,
-      );
-
-      if (postsMissingDareId.length > 0) {
-        const postStoragePaths = postsMissingDareId.map(
-          (post) => `post:${post.id}`,
-        );
-
-        const { data: proofRows, error: proofRowsError } =
-          await supabase
-            .from('dare_proofs')
-            .select('participant_id,storage_path')
-            .in('storage_path', postStoragePaths);
-
-        if (proofRowsError) {
-          console.warn(
-            'Could not backfill Dare ids for proof posts:',
-            proofRowsError,
-          );
-        } else if ((proofRows ?? []).length > 0) {
-          const participantIds = Array.from(
-            new Set(
-              (proofRows ?? [])
-                .map((row) => row.participant_id)
-                .filter(
-                  (id): id is string =>
-                    typeof id === 'string' && id.length > 0,
-                ),
-            ),
-          );
-
-          if (participantIds.length > 0) {
-            const { data: participantRows, error: participantRowsError } =
-              await supabase
-                .from('dare_participants')
-                .select('id,dare_id')
-                .in('id', participantIds);
-
-            if (participantRowsError) {
-              console.warn(
-                'Could not load Dare ids for proof posts:',
-                participantRowsError,
-              );
-            } else {
-              const participantDareMap = new Map(
-                (participantRows ?? []).map((row) => [
-                  row.id,
-                  row.dare_id,
-                ]),
-              );
-
-              const proofDareMap = new Map<string, string>();
-
-              (proofRows ?? []).forEach((row) => {
-                const dareId = participantDareMap.get(row.participant_id);
-                if (dareId && row.storage_path) {
-                  proofDareMap.set(row.storage_path, dareId);
-                }
-              });
-
-              socialPosts.forEach((post) => {
-                if (!post.dare_id) {
-                  const recoveredDareId = proofDareMap.get(
-                    `post:${post.id}`,
-                  );
-                  if (recoveredDareId) {
-                    post.dare_id = recoveredDareId;
-                  }
-                }
-              });
-            }
-          }
-        }
-      }
-
-if (socialPosts.length === 0) {
+      if (socialPosts.length === 0) {
 
 
 
@@ -1106,6 +1072,22 @@ if (socialPosts.length === 0) {
 
 
 
+      // Current user's newest posts stay at the top after publishing.
+      const orderedVisiblePosts = [
+        ...visiblePosts.filter(
+          (post) =>
+            currentUserId !== null &&
+            post.user_id === currentUserId,
+        ),
+        ...visiblePosts.filter(
+          (post) =>
+            currentUserId === null ||
+            post.user_id !== currentUserId,
+        ),
+      ];
+
+
+
       if (visiblePosts.length === 0) {
 
         setPosts([]);
@@ -1121,6 +1103,53 @@ if (socialPosts.length === 0) {
   (post) => post.id,
 
 );
+
+      // =====================================================
+      // DISCOVER POST CLASSIFICATION
+      //
+      // post_type = media format (photo/video)
+      // dare_id   = content origin:
+      //   NULL -> normal post
+      //   UUID -> Dare completion post
+      // =====================================================
+
+      const dareIds = [
+        ...new Set(
+          visiblePosts
+            .map((post) => post.dare_id)
+            .filter(
+              (id: string | null): id is string =>
+                typeof id === 'string' && id.length > 0,
+            ),
+        ),
+      ];
+
+      const dareTitleMap = new Map<string, string>();
+
+      if (dareIds.length > 0) {
+        const { data: linkedDares, error: linkedDaresError } =
+          await supabase
+            .from('dares')
+            .select('id,title')
+            .in('id', dareIds);
+
+        if (linkedDaresError) {
+          console.error(
+            '[DareShot] Discover Dare lookup failed:',
+            linkedDaresError,
+          );
+        } else {
+          for (const dare of linkedDares ?? []) {
+            if (
+              typeof dare.id === 'string' &&
+              typeof dare.title === 'string'
+            ) {
+              dareTitleMap.set(dare.id, dare.title);
+            }
+          }
+        }
+      }
+
 
 
 
@@ -1504,7 +1533,7 @@ if (socialPosts.length === 0) {
 
 
 
-      for (const post of visiblePosts) {
+      for (const post of orderedVisiblePosts) {
 
 
 
@@ -1781,41 +1810,20 @@ if (socialPosts.length === 0) {
 
 
         feedPosts.push({
-
-
-
           ...post,
-
-
-
           profile: profileMap.get(
-
-
-
             post.user_id,
-
-
-
           ),
-
-
-
           signedMediaUrl,
-
-
-
           likeCount,
-
-
-
           likedByMe,
-
-
-
           commentCount,
-
-
-
+          postKind: post.dare_id
+            ? 'dare_completion'
+            : 'normal',
+          dareTitle: post.dare_id
+            ? dareTitleMap.get(post.dare_id) ?? null
+            : null,
         });
 
 
@@ -1829,6 +1837,9 @@ if (socialPosts.length === 0) {
 
 
       setPosts(feedPosts);
+      postLayoutsRef.current = {};
+      activeVideoPostIdRef.current = null;
+      setActiveVideoPostId(null);
 
 
 
@@ -2065,6 +2076,8 @@ useEffect(() => {
 
 
       setScreenFocused(true);
+      void loadPosts();
+      void loadDares();
 
 
 
@@ -2077,6 +2090,8 @@ useEffect(() => {
 
 
         setScreenFocused(false);
+      activeVideoPostIdRef.current = null;
+      setActiveVideoPostId(null);
 
 
 
@@ -2084,7 +2099,7 @@ useEffect(() => {
 
 
 
-    }, []),
+    }, [loadPosts, loadDares]),
 
 
 
@@ -4073,13 +4088,9 @@ useEffect(() => {
 
 
       onScroll={(event) => {
-
-
-
-        setScrollY(event.nativeEvent.contentOffset.y);
-
-
-
+        const nextY = event.nativeEvent.contentOffset.y;
+        setScrollY(nextY);
+        recomputeActiveVideoPost(nextY);
       }}
 
 
@@ -4140,7 +4151,13 @@ useEffect(() => {
 
 
 
-        <View style={styles.feed}>
+        <View
+          style={styles.feed}
+          onLayout={(event) => {
+            feedOffsetYRef.current = event.nativeEvent.layout.y;
+            recomputeActiveVideoPost(scrollY);
+          }}
+        >
 
 
 
@@ -4158,16 +4175,7 @@ useEffect(() => {
 
               post={post}
 
-onOpenDare={() => {
-  if (post.dare_id) {
-    router.push({
-      pathname: '/dare-detail',
-      params: {
-        id: post.dare_id,
-      },
-    });
-  }
-}}
+
 
               onLike={() => handleLike(post)}
 
@@ -4194,13 +4202,9 @@ onOpenDare={() => {
 
 
               scrollY={scrollY}
-
-
-
               screenFocused={screenFocused}
-
-
-
+              isVideoActive={activeVideoPostId === post.id}
+              onCardLayout={(y, height) => handlePostLayout(post.id, y, height)}
             />
 
 
@@ -4681,8 +4685,6 @@ function PostCard({
 
   post,
 
-  onOpenDare,
-
   onLike,
 
   onLikeCountPress,
@@ -4696,14 +4698,13 @@ function PostCard({
   isOwner,
 
   scrollY,
-
   screenFocused,
+  isVideoActive,
+  onCardLayout,
 
 }: {
 
   post: FeedPost;
-
-  onOpenDare: () => void;
 
   onLike: () => void;
 
@@ -4718,8 +4719,9 @@ function PostCard({
   isOwner: boolean;
 
   scrollY: number;
-
   screenFocused: boolean;
+  isVideoActive: boolean;
+  onCardLayout: (y: number, height: number) => void;
 
 }) {
 
@@ -4833,7 +4835,13 @@ function PostCard({
 
 
 
-    <View style={styles.postCard}>
+    <View
+      style={styles.postCard}
+      onLayout={(event) => {
+        const { y, height } = event.nativeEvent.layout;
+        onCardLayout(y, height);
+      }}
+    >
 
 
 
@@ -5084,49 +5092,165 @@ function PostCard({
 
 
       </Pressable>
+      {/* Post origin */}
+      <View style={styles.postKindRow}>
+        <View
+          style={[
+            styles.postKindBadge,
+            post.postKind === 'dare_completion'
+              ? styles.dareCompletionBadge
+              : styles.normalPostBadge,
+          ]}
+        >
+          <Text style={styles.postKindBadgeText}>
+            {post.postKind === 'dare_completion'
+              ? 'Dare Completion'
+              : 'Normal Post'}
+          </Text>
+        </View>
 
-      <Pressable
-        onPress={onOpenDare}
-        disabled={!post.dare_id}
-        accessibilityRole={post.dare_id ? 'button' : undefined}
-        accessibilityLabel={
-          post.dare_id ? 'Open Dare details' : undefined
-        }
-      >
-        {/* Caption */}
-        {post.content ? (
-          <Text style={styles.postContent}>
-            {post.content}
+        {post.postKind === 'dare_completion' &&
+        post.dareTitle ? (
+          <Text
+            style={styles.dareTitleLabel}
+            numberOfLines={1}
+          >
+            {post.dareTitle}
           </Text>
         ) : null}
+      </View>
 
-        {/* Photo */}
-        {isPhoto ? (
-          <Image
-            source={{
-              uri: post.signedMediaUrl!,
-            }}
-            style={styles.postImage}
-            resizeMode="contain"
-          />
-        ) : null}
+      {/* Caption */}
 
-        {/* Video */}
-        {isVideo ? (
-          <PostVideo
-            uri={post.signedMediaUrl!}
-            scrollY={scrollY}
-            screenFocused={screenFocused}
-          />
-        ) : null}
 
-        {/* Text-only indicator */}
-        {isText && !post.content ? (
-          <Text style={styles.emptyPostText}>
-            Shared a post
-          </Text>
-        ) : null}
-      </Pressable>
+
+      
+
+
+
+      {post.content ? (
+        <Text
+
+
+
+          style={styles.postContent}
+
+
+
+       >
+
+
+
+          {post.content}
+
+
+
+        </Text>
+
+
+
+      ) : null}
+
+
+
+
+
+
+
+      {/* Photo */}
+
+
+
+      {isPhoto ? (
+
+
+
+        <Image
+
+
+
+          source={{
+
+
+
+            uri: post.signedMediaUrl!,
+
+
+
+          }}
+
+
+
+          style={styles.postImage}
+
+
+
+          resizeMode="contain"
+
+
+
+        />
+
+
+
+      ) : null}
+
+
+
+      {isVideo ? (
+
+
+
+  <PostVideo
+          uri={post.signedMediaUrl!}
+          active={isVideoActive && screenFocused}
+        />
+
+
+
+) : null}
+
+
+
+
+
+
+
+      {/* Text-only indicator */}
+
+
+
+      {isText && !post.content ? (
+
+
+
+        <Text
+
+
+
+          style={styles.emptyPostText}
+
+
+
+       >
+
+
+
+          Shared a post
+
+
+
+        </Text>
+
+
+
+      ) : null}
+
+
+
+
+
+
 
       {/* Social actions */}
 
@@ -5809,641 +5933,21 @@ function LikeUsersModal({
 
 
 function PostVideo({
-
-
-
   uri,
-
-
-
-  scrollY,
-
-
-
-  screenFocused,
-
-
-
+  active,
 }: {
-
-
-
   uri: string;
-
-
-
-  scrollY: number;
-
-
-
-  screenFocused: boolean;
-
-
-
+  active: boolean;
 }) {
-
-
-
-  const [muted, setMuted] = useState(true);
-
-
-
-
-
-
-
-  const videoRef = useRef<View>(null);
-
-
-
-  const isVisibleRef = useRef(false);
-
-
-
-
-
-
-
-  const player = useVideoPlayer(uri, (videoPlayer) => {
-
-
-
-    videoPlayer.loop = true;
-
-
-
-    videoPlayer.muted = true;
-
-
-
-  });
-
-
-
-
-
-
-
-  const { status } = useEvent(player, 'statusChange', {
-
-
-
-    status: player.status,
-
-
-
-  });
-
-
-
-
-
-
-
-
-
-
-
-  const updatePlayback = useCallback(() => {
-
-
-
-    videoRef.current?.measureInWindow(
-
-
-
-      (_x, y, _width, height) => {
-
-
-
-        const viewportHeight =
-
-
-
-          Dimensions.get('window').height;
-
-
-
-
-
-
-
-        if (height <= 0 || viewportHeight <= 0) {
-
-
-
-          player.pause();
-
-
-
-          isVisibleRef.current = false;
-
-
-
-          return;
-
-
-
-        }
-
-
-
-
-
-
-
-        const visibleTop = Math.max(y, 0);
-
-
-
-        const visibleBottom = Math.min(
-
-
-
-          y + height,
-
-
-
-          viewportHeight,
-
-
-
-        );
-
-
-
-
-
-
-
-        const visibleHeight = Math.max(
-
-
-
-          0,
-
-
-
-          visibleBottom - visibleTop,
-
-
-
-        );
-
-
-
-
-
-
-
-        const visibleRatio =
-
-
-
-          visibleHeight / height;
-
-
-
-
-
-
-
-        const shouldPlay =
-
-
-
-          visibleRatio>= 0.5;
-
-
-
-          if (Platform.OS === 'web') {
-
-
-
-  player.muted = true;
-
-
-
-}
-
-
-
-
-
-
-
-        isVisibleRef.current =
-
-
-
-          shouldPlay;
-
-
-
-
-
-
-
-        if (
-
-
-
-          shouldPlay &&
-
-
-
-          status === 'readyToPlay'
-
-
-
-        ) {
-
-
-
-          player.muted = muted;
-
-
-
-          player.play();
-
-
-
-        } else {
-
-
-
-          player.pause();
-
-
-
-        }
-
-
-
-      },
-
-
-
-    );
-
-
-
-  }, [
-
-
-
-    muted,
-
-
-
-    player,
-
-
-
-    status,
-
-
-
-    scrollY,
-
-
-
-  ]);
-
-
-
-
-
-
-
-    useEffect(() => {
-
-
-
-    if (!screenFocused) {
-
-
-
-      player.pause();
-
-
-
-      isVisibleRef.current = false;
-
-
-
-      return;
-
-
-
-    }
-
-
-
-
-
-
-
-    updatePlayback();
-
-
-
-  }, [
-
-
-
-    screenFocused,
-
-
-
-    player,
-
-
-
-    updatePlayback,
-
-
-
-  ]);
-
-
-
-  useEffect(() => {
-
-
-
-    const timer = setTimeout(() => {
-
-
-
-      updatePlayback();
-
-
-
-    }, 50);
-
-
-
-
-
-
-
-    return () => {
-
-
-
-      clearTimeout(timer);
-
-
-
-    };
-
-
-
-  }, [updatePlayback]);
-
-
-
-
-
-
-
-  /*
-
-
-
-   * When video becomes ready, immediately
-
-
-
-   * check whether it is currently visible.
-
-
-
-   */
-
-
-
-  useEffect(() => {
-
-
-
-    if (status === 'readyToPlay') {
-
-
-
-      const timer = setTimeout(() => {
-
-
-
-        updatePlayback();
-
-
-
-      }, 50);
-
-
-
-
-
-
-
-      return () => {
-
-
-
-        clearTimeout(timer);
-
-
-
-      };
-
-
-
-    }
-
-
-
-  }, [status, updatePlayback]);
-
-
-
-
-
-
-
-  /*
-
-
-
-   * Always pause when component unmounts.
-
-
-
-   */
-
-
-
-
-
-
-
-
-
-
-
-  const toggleMute = () => {
-
-
-
-    const nextMuted = !muted;
-
-
-
-
-
-
-
-    player.muted = nextMuted;
-
-
-
-    setMuted(nextMuted);
-
-
-
-  };
-
-
-
-
-
-
-
   return (
-
-
-
-    <View
-
-
-
-      ref={videoRef}
-
-
-
-      style={styles.videoContainer}
-
-
-
-   >
-
-
-
-      <VideoView
-
-
-
-        player={player}
-
-
-
-        style={styles.postVideo}
-
-
-
-        contentFit="contain"
-
-
-
-        nativeControls={false}
-
-
-
-        playsInline
-
-
-
-      />
-
-
-
-
-
-
-
-      <Pressable
-
-
-
-        onPress={toggleMute}
-
-
-
-        style={styles.videoMuteButton}
-
-
-
-        accessibilityRole="button"
-
-
-
-        accessibilityLabel={
-
-
-
-          muted
-
-
-
-            ? 'Unmute video'
-
-
-
-            : 'Mute video'
-
-
-
-        }
-
-
-
-     >
-
-
-
-        <Text
-
-
-
-          style={styles.videoMuteText}
-
-
-
-       >
-
-
-
-          {muted ? '🔇' : '🔊'}
-
-
-
-        </Text>
-
-
-
-      </Pressable>
-
-
-
-    </View>
-
-
-
+    <FeedVideo
+      uri={uri}
+      active={active}
+      contentFit="contain"
+      mutedByDefault
+      style={styles.postVideo}
+    />
   );
-
-
-
 }
 
 
@@ -8516,6 +8020,41 @@ const styles = StyleSheet.create({
 
 
   },
+  postKindRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+
+  postKindBadge: {
+    borderRadius: 999,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+
+  normalPostBadge: {
+    backgroundColor: colors.surface,
+  },
+
+  dareCompletionBadge: {
+    backgroundColor: colors.surface,
+  },
+
+  postKindBadgeText: {
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+  },
+
+  dareTitleLabel: {
+    flex: 1,
+    color: colors.secondaryText,
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.xs,
+  },
+
 
 
 

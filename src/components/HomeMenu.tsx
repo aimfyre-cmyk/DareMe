@@ -1,3 +1,6 @@
+import {
+  Ionicons,
+} from '@expo/vector-icons';
 import { router } from 'expo-router';
 import {
   Modal,
@@ -21,6 +24,31 @@ type HomeMenuProps = {
   visible: boolean;
   onClose: () => void;
   items: MenuItem[];
+};
+
+/**
+ * Home Menu icon mapping
+ *
+ * Icons are controlled here so every menu item has
+ * a consistent professional Ionicons icon.
+ */
+const menuIconMap: Record<
+  string,
+  keyof typeof Ionicons.glyphMap
+> = {
+  Dashboard: 'grid-outline',
+  'My Dares': 'flame-outline',
+  Saved: 'bookmark-outline',
+  'My Activity': 'time-outline',
+  'Dare Circle': 'people-outline',
+  'Invite Friends': 'person-add-outline',
+  Leaderboard: 'trophy-outline',
+  'Global Ranking': 'podium-outline',
+  Rewards: 'gift-outline',
+  'My Profile': 'person-circle-outline',
+  Settings: 'settings-outline',
+  Notifications: 'notifications-outline',
+  'Dare Shot': 'flash-outline',
 };
 
 export function HomeMenu({
@@ -48,13 +76,23 @@ export function HomeMenu({
         {
           title: 'Dashboard',
           subtitle: 'Your DareShot performance',
-          icon: '📊',
+          icon: 'grid-outline',
           onPress: () => {
             router.push('/dashboard');
           },
         },
         ...items,
       ];
+
+  const getMenuIcon = (
+    item: MenuItem,
+  ): keyof typeof Ionicons.glyphMap => {
+    return (
+      menuIconMap[item.title] ??
+      (item.icon as keyof typeof Ionicons.glyphMap) ??
+      'ellipse-outline'
+    );
+  };
 
   return (
     <Modal
@@ -105,9 +143,11 @@ export function HomeMenu({
                 ]}
               >
                 <View style={styles.iconBox}>
-                  <Text style={styles.icon}>
-                    {item.icon}
-                  </Text>
+                  <Ionicons
+                    name={getMenuIcon(item)}
+                    size={22}
+                    color={colors.primaryText}
+                  />
                 </View>
 
                 <View style={styles.itemContent}>
@@ -120,7 +160,12 @@ export function HomeMenu({
                   </Text>
                 </View>
 
-                <Text style={styles.arrow}>›</Text>
+                <Ionicons
+                  name="chevron-forward-outline"
+                  size={20}
+                  color={colors.secondaryText}
+                  style={styles.arrow}
+                />
               </Pressable>
             ))}
           </ScrollView>
@@ -217,10 +262,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
   },
 
-  icon: {
-    fontSize: 21,
-  },
-
   itemContent: {
     flex: 1,
     marginLeft: spacing.md,
@@ -239,8 +280,6 @@ const styles = StyleSheet.create({
   },
 
   arrow: {
-    color: colors.secondaryText,
-    fontSize: 28,
     marginLeft: spacing.sm,
   },
 });

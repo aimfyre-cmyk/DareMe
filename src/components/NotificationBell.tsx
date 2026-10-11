@@ -1,7 +1,7 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-
 import { colors } from '../constants/theme';
 import { supabase } from '../lib/supabase';
 
@@ -54,8 +54,11 @@ export function NotificationBell() {
       }
       hitSlop={10}
     >
-      <Text style={styles.bell}>🔔</Text>
-
+<Ionicons
+  name="notifications-outline"
+  size={24}
+  color={colors.primaryText}
+/>
       {unreadCount > 0 && (
         <View style={styles.badge}>
           <Text style={styles.badgeText}>
@@ -76,11 +79,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     position: 'relative',
   },
-  bell: {
-  color: colors.primaryText,
-  fontSize: 24,
-  lineHeight: 28,
-},
+ 
 
   badge: {
     position: 'absolute',

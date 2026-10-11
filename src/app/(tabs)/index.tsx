@@ -1,12 +1,11 @@
-import { router } from 'expo-router';
-
-import { useCallback, useEffect, useState } from 'react';
+import { router, useIsFocused, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   ActivityIndicator,
 
   Alert,
-
+  FlatList,
   Image,
 
   KeyboardAvoidingView,
@@ -17,6 +16,7 @@ import {
 
   Pressable,
 
+  RefreshControl,
   ScrollView,
 
   StyleSheet,
@@ -26,13 +26,11 @@ import {
   TextInput,
 
   View,
+  type ViewToken,
 } from 'react-native';
 
-import { getR2MediaUrl } from '../../features/onboarding/profileService';
-
-
-
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { getR2MediaUrl } from '../../features/onboarding/profileService';
 
 import { AppHeader } from '../../components/AppHeader';
 
@@ -91,6 +89,14 @@ type DareRow = {
   time_limit_minutes: number | null;
   participation_duration_minutes: number | null;
   voting_enabled: boolean;
+  media_type: 'image' | 'video' | null;
+  media_url: string | null;
+  max_participants?: number | null;
+  required_votes?: number | null;
+  voting_duration_minutes?: number | null;
+  rules?: string | null;
+
+  [key: string]: unknown;
 
 };
 
@@ -131,6 +137,14 @@ type HomeDare = MockDare & {
   timeLimitMinutes: number | null;
   participationDurationMinutes: number | null;
   votingEnabled: boolean;
+  mediaType: 'image' | 'video' | null;
+  mediaUrl: string | null;
+  createdAt: string;
+  status: string;
+  maxParticipants: number | null;
+  requiredVotes: number | null;
+  votingDurationMinutes: number | null;
+  rules: string | null;
 
 };
 
@@ -229,6 +243,24 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
 
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const cursorRef = useRef<{ createdAt: string; id: string } | null>(null);
+  const { refresh } = useLocalSearchParams<{ refresh?: string }>();
+
+  const [activeVideoDareId, setActiveVideoDareId] = useState<string | null>(null);
+  const activeVideoDareIdRef = useRef<string | null>(null);
+  const latestViewableItemsRef = useRef<ViewToken[]>([]);
+  const daresRef = useRef<HomeDare[]>([]);
+  const didInitialLoadRef = useRef(false);
+  const isHomeFocused = useIsFocused();
+  const isHomeFocusedRef = useRef(isHomeFocused);
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 55,
+    minimumViewTime: 80,
+  }).current;
 
   const [takingDare, setTakingDare] = useState<string | null>(null);
 
@@ -264,6 +296,8 @@ export default function HomeScreen() {
   const [selectedDare, setSelectedDare] = useState<HomeDare | null>(null);
   const [selectedParticipantId, setSelectedParticipantId] =
     useState<string | null>(null);
+  const [selectedCreatorName, setSelectedCreatorName] = useState<string | null>(null);
+  const [selectedParticipantCount, setSelectedParticipantCount] = useState<number | null>(null);
 
   const [commentSubmitting, setCommentSubmitting] = useState(false);
 
@@ -291,206 +325,228 @@ export default function HomeScreen() {
 
   const [shareSending, setShareSending] = useState(false);
 
-  const loadDares = useCallback(async () => {
-
+  const loadDares = useCallback(async (showLoading = true, append = false) => {
     try {
-
-      setLoading(true);
-
+      if (showLoading && !append) setLoading(true);
+      if (append) setLoadingMore(true);
       setError(null);
 
-
-
-      const { data, error: fetchError } = await supabase
-
-        .from('dares')
-
-        .select(
-
-          'id, creator_id, title, description, category, difficulty, xp_value, proof_type, status, visibility, created_at, time_limit_minutes, participation_duration_minutes, voting_enabled',
-
-        )
-
-        .eq('status', 'active')
-
-        .eq('visibility', 'anyone')
-
-        .order('created_at', { ascending: false });
-
-
-
-      if (fetchError) {
-
-        throw fetchError;
-
-      }
-
-
-
-      const {
-
-        data: { user },
-
-      } = await supabase.auth.getUser();
-
-
-
+      const { data: { user } } = await supabase.auth.getUser();
       setCurrentUserId(user?.id ?? null);
 
+      let query = supabase
+        .from('dares')
+        .select('*')
+        .eq('status', 'active')
+        .eq('visibility', 'anyone')
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(15);
 
+      const cursor = cursorRef.current;
+      if (append && cursor) {
+        query = query.or(
+          `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+        );
+      }
 
-      const mappedDares = ((data ?? []) as DareRow[]).map((dare) => ({
+      const { data, error: fetchError } = await query;
+      if (fetchError) throw fetchError;
 
+      const rows = (data ?? []) as DareRow[];
+      const mappedDares = rows.map((dare) => ({
         id: dare.id,
-
         creatorId: dare.creator_id,
-
         title: dare.title,
         description: dare.description ?? null,
         timeLimitMinutes: dare.time_limit_minutes ?? null,
-        participationDurationMinutes:
-          dare.participation_duration_minutes ?? null,
+        participationDurationMinutes: dare.participation_duration_minutes ?? null,
         votingEnabled: dare.voting_enabled === true,
-
         category: dare.category,
-
         difficulty: formatDifficulty(dare.difficulty),
-
         xpValue: dare.xp_value,
-
         proofType: formatProofType(dare.proof_type),
-
+        mediaType: dare.media_type ?? null,
+        mediaUrl: dare.media_url ?? null,
+        createdAt: dare.created_at,
+        status: dare.status,
+        maxParticipants: typeof dare.max_participants === 'number' ? dare.max_participants : null,
+        requiredVotes: typeof dare.required_votes === 'number' ? dare.required_votes : null,
+        votingDurationMinutes: typeof dare.voting_duration_minutes === 'number' ? dare.voting_duration_minutes : null,
+        rules: typeof dare.rules === 'string' ? dare.rules : null,
       }));
 
+      const orderedDares = [
+        ...mappedDares.filter((dare) => user?.id && dare.creatorId === user.id),
+        ...mappedDares.filter((dare) => !user?.id || dare.creatorId !== user.id),
+      ];
 
+      const previousDareIds = daresRef.current.map((dare) => dare.id);
+      const nextDares = append ? [...daresRef.current, ...orderedDares] : orderedDares;
+      daresRef.current = nextDares;
+      setDares(nextDares);
 
-      const dareIds = mappedDares.map((dare) => dare.id);
-
-
-
-      if (dareIds.length > 0) {
-
-        const [likesResult, commentsResult] = await Promise.all([
-
-          supabase
-
-            .from('dare_likes')
-
-            .select('dare_id, user_id')
-
-            .in('dare_id', dareIds),
-
-          supabase
-
-            .from('dare_comments')
-
-            .select('dare_id')
-
-            .in('dare_id', dareIds),
-
-        ]);
-
-
-
-        if (likesResult.error) {
-
-          throw likesResult.error;
-
+      if (!append) {
+        const firstDare = nextDares[0];
+        if (firstDare?.mediaType === 'video' && activeVideoDareIdRef.current === null) {
+          // Only use this as an initial fallback. Viewability immediately
+          // takes over once FlatList reports the actual foreground item.
+          activeVideoDareIdRef.current = firstDare.id;
+          setActiveVideoDareId(firstDare.id);
         }
-
-
-
-        if (commentsResult.error) {
-
-          throw commentsResult.error;
-
-        }
-
-
-
-        const nextLikeCounts: Record<string, number> = {};
-
-        const nextLikedDares = new Set<string>();
-
-
-
-        for (const like of likesResult.data ?? []) {
-
-          nextLikeCounts[like.dare_id] =
-
-            (nextLikeCounts[like.dare_id] ?? 0) + 1;
-
-
-
-          if (user && like.user_id === user.id) {
-
-            nextLikedDares.add(like.dare_id);
-
-          }
-
-        }
-
-
-
-        const nextCommentCounts: Record<string, number> = {};
-
-
-
-        for (const comment of commentsResult.data ?? []) {
-
-          nextCommentCounts[comment.dare_id] =
-
-            (nextCommentCounts[comment.dare_id] ?? 0) + 1;
-
-        }
-
-
-
-        setLikeCounts(nextLikeCounts);
-
-        setLikedDares(nextLikedDares);
-
-        setCommentCounts(nextCommentCounts);
-
-      } else {
-
-        setLikeCounts({});
-
-        setLikedDares(new Set());
-
-        setCommentCounts({});
-
       }
 
+      if (rows.length > 0) {
+        const last = rows[rows.length - 1];
+        cursorRef.current = { createdAt: last.created_at, id: last.id };
+      }
+      setHasMore(rows.length === 15);
 
+      if (!append) setLoading(false);
 
-      setDares(mappedDares);
+      const allDareIds = append
+        ? [...previousDareIds, ...orderedDares.map((dare) => dare.id)]
+        : orderedDares.map((dare) => dare.id);
 
+      if (allDareIds.length > 0) {
+        try {
+          const [likesResult, commentsResult] = await Promise.all([
+            supabase.from('dare_likes').select('dare_id, user_id').in('dare_id', allDareIds),
+            supabase.from('dare_comments').select('dare_id').in('dare_id', allDareIds),
+          ]);
+          if (likesResult.error) throw likesResult.error;
+          if (commentsResult.error) throw commentsResult.error;
+
+          const nextLikeCounts: Record<string, number> = {};
+          const nextLikedDares = new Set<string>();
+          for (const like of likesResult.data ?? []) {
+            nextLikeCounts[like.dare_id] = (nextLikeCounts[like.dare_id] ?? 0) + 1;
+            if (user && like.user_id === user.id) nextLikedDares.add(like.dare_id);
+          }
+          const nextCommentCounts: Record<string, number> = {};
+          for (const comment of commentsResult.data ?? []) {
+            nextCommentCounts[comment.dare_id] = (nextCommentCounts[comment.dare_id] ?? 0) + 1;
+          }
+          setLikeCounts(nextLikeCounts);
+          setLikedDares(nextLikedDares);
+          setCommentCounts(nextCommentCounts);
+        } catch (engagementError) {
+          console.error('[Home] Failed to load dare engagement:', engagementError);
+        }
+      } else if (!append) {
+        setLikeCounts({});
+        setLikedDares(new Set());
+        setCommentCounts({});
+      }
     } catch (err) {
-
       console.error('[Home] Failed to load dares:', err);
-
-      setError('Unable to load dares right now.');
-
-      setDares([]);
-
+      if (!append) {
+        setError('Unable to load dares right now.');
+        daresRef.current = [];
+        setDares([]);
+      }
     } finally {
-
       setLoading(false);
-
+      setLoadingMore(false);
+      setRefreshing(false);
     }
-
   }, []);
 
-
+  const handleLoadMore = useCallback(() => {
+    if (loading || loadingMore || !hasMore || dares.length === 0) return;
+    void loadDares(false, true);
+  }, [dares.length, hasMore, loadDares, loading, loadingMore]);
 
   useEffect(() => {
+    if (didInitialLoadRef.current) return;
+    didInitialLoadRef.current = true;
+    cursorRef.current = null;
+    setHasMore(true);
+    void loadDares(true, false);
+  }, [loadDares]);
 
-    loadDares();
+  useEffect(() => {
+    if (!refresh || !didInitialLoadRef.current) return;
 
+    cursorRef.current = null;
+    setHasMore(true);
+    void loadDares(true, false);
+  }, [refresh, loadDares]);
+
+  const handleRefresh = useCallback(async () => {
+    cursorRef.current = null;
+    setHasMore(true);
+    setRefreshing(true);
+    await loadDares(false, false);
   }, [loadDares]);
 
 
+  const activateVideoFromViewability = useCallback((items: ViewToken[]) => {
+    latestViewableItemsRef.current = items;
+
+    if (!isHomeFocusedRef.current) {
+      activeVideoDareIdRef.current = null;
+      setActiveVideoDareId(null);
+      return;
+    }
+
+    // Home Dare cards are intentionally treated as one active media surface.
+    // Viewability callbacks can contain more than one item. Select the
+    // currently viewable video instead of blindly using the first token; this
+    // prevents a photo card above/below the video from keeping the video black.
+    const nextActiveVideoId =
+      (items.find((token) => {
+        const item = token.item as HomeDare | undefined;
+        return token.isViewable && item?.mediaType === 'video';
+      })?.item as HomeDare | undefined)?.id ?? null;
+
+    if (nextActiveVideoId !== activeVideoDareIdRef.current) {
+      activeVideoDareIdRef.current = nextActiveVideoId;
+      setActiveVideoDareId(nextActiveVideoId);
+    }
+  }, []);
+
+  const handleViewableItemsChanged = useRef(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      activateVideoFromViewability(viewableItems);
+    },
+  ).current;
+
+  const handleScrollBeginDrag = useCallback(() => {
+    // Pause the currently playing card immediately when the user starts
+    // scrolling. The DareCard receives false and pauses its native player.
+    activeVideoDareIdRef.current = null;
+    setActiveVideoDareId(null);
+  }, []);
+
+  const handleMomentumScrollEnd = useCallback(() => {
+    if (!isHomeFocused) return;
+    activateVideoFromViewability(latestViewableItemsRef.current);
+  }, [activateVideoFromViewability, isHomeFocused]);
+
+  useEffect(() => {
+    if (dares.length === 0) {
+      activeVideoDareIdRef.current = null;
+      setActiveVideoDareId(null);
+    }
+  }, [dares.length]);
+
+  // Tab navigation must never leave a Home video playing in the background.
+  // When Home becomes focused again, reuse the latest FlatList viewability
+  // snapshot instead of forcing a full feed refresh.
+  useEffect(() => {
+    isHomeFocusedRef.current = isHomeFocused;
+
+    if (!isHomeFocused) {
+      activeVideoDareIdRef.current = null;
+      setActiveVideoDareId(null);
+      return;
+    }
+
+    if (latestViewableItemsRef.current.length > 0) {
+      activateVideoFromViewability(latestViewableItemsRef.current);
+    }
+  }, [activateVideoFromViewability, isHomeFocused]);
 
 useEffect(() => {
 
@@ -778,11 +834,32 @@ useEffect(() => {
   const openDarePopup = async (dare: HomeDare) => {
     setSelectedDare(dare);
     setSelectedParticipantId(null);
+    setSelectedCreatorName(null);
+    setSelectedParticipantCount(null);
 
     try {
       const {
         data: { user },
       } = await supabase.auth.getUser();
+
+      const { data: creatorProfile } = await supabase
+        .from('profiles')
+        .select('display_name,username')
+        .eq('id', dare.creatorId)
+        .maybeSingle();
+
+      setSelectedCreatorName(
+        creatorProfile?.display_name || creatorProfile?.username || null,
+      );
+
+      const { count: participantCount, error: participantCountError } = await supabase
+        .from('dare_participants')
+        .select('id', { count: 'exact', head: true })
+        .eq('dare_id', dare.id);
+
+      if (!participantCountError) {
+        setSelectedParticipantCount(participantCount ?? 0);
+      }
 
       if (!user) {
         return;
@@ -818,6 +895,8 @@ useEffect(() => {
   const closeDarePopup = () => {
     setSelectedDare(null);
     setSelectedParticipantId(null);
+    setSelectedCreatorName(null);
+    setSelectedParticipantCount(null);
   };
 
   const handleTakeDare = async (dareId: string) => {
@@ -2036,7 +2115,8 @@ useEffect(() => {
 
 
 
-            setDares((current) => current.filter((dare) => dare.id !== dareId));
+            daresRef.current = daresRef.current.filter((dare) => dare.id !== dareId);
+            setDares(daresRef.current);
 
             setLikeCounts((current) => {
 
@@ -2079,6 +2159,15 @@ useEffect(() => {
   };
 
 
+
+  const activeVideoIndex = activeVideoDareId
+    ? dares.findIndex((dare) => dare.id === activeVideoDareId)
+    : -1;
+
+  const nextPreloadVideoId =
+    activeVideoIndex >= 0
+      ? dares.slice(activeVideoIndex + 1).find((dare) => dare.mediaType === 'video')?.id ?? null
+      : null;
 
   return (
 
@@ -2266,191 +2355,123 @@ useEffect(() => {
 
 />
 
-      <SectionHeader title="For You" />
-
-
-
-      {loading ? (
-
-        <View style={styles.centerState}>
-
-          <ActivityIndicator
-
-            size="small"
-
-            color={colors.accent}
-
+      <FlatList<HomeDare>
+        style={styles.homeScroll}
+        contentContainerStyle={styles.homeScrollContent}
+        data={loading || error || !hasDares ? [] : dares}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item: dare }) => (
+          <View style={styles.dareArenaItem}>
+          <DareCard
+            dare={dare}
+            loading={takingDare === dare.id}
+            inProgress={inProgressDares.has(dare.id)}
+            likeCount={likeCounts[dare.id] ?? 0}
+            commentCount={commentCounts[dare.id] ?? 0}
+            likedByMe={likedDares.has(dare.id)}
+            onLike={() => handleLike(dare.id)}
+            onLikeCountPress={() => handleLikeCountPress(dare.id)}
+            onComment={() => handleComment(dare.id)}
+            onShare={() => handleShare(dare)}
+            isOwner={dare.creatorId === currentUserId}
+            onDelete={() => handleDelete(dare.id)}
+            onPress={() => {
+              void openDarePopup(dare);
+            }}
+            onPrimaryAction={() => {
+              void handleTakeDare(dare.id);
+            }}
+            savedByMe={savedDares.has(dare.id)}
+            onSave={() => handleSaveDare(dare.id)}
+            isVideoActive={activeVideoDareId === dare.id}
+            preloadVideo={nextPreloadVideoId === dare.id}
+            onViewMore={() => { void openDarePopup(dare); }}
+            timestampLabel={formatRelativeTime(dare.createdAt)}
           />
-
-
-
-          <Text style={styles.stateText}>
-
-            Loading dares...
-
-          </Text>
-
-        </View>
-
-      ) : error ? (
-
-        <View style={styles.centerState}>
-
-          <Text style={styles.errorText}>
-
-            {error}
-
-          </Text>
-
-
-
-          <Pressable
-
-            onPress={loadDares}
-
-            style={styles.retryButton}
-
-          >
-
-            <Text style={styles.retryText}>
-
-              Try Again
-
-            </Text>
-
-          </Pressable>
-
-        </View>
-
-      ) : hasDares ? (
-
-        <View style={styles.feed}>
-
-          <View style={styles.featuredHeader}>
-
-            <Text style={styles.featuredLabel}>
-
-              🔥 TODAY'S DARES
-
-            </Text>
-
-
-
-            <Text style={styles.featuredSubtitle}>
-
-              Pick a dare. Take the challenge.
-
-            </Text>
-
           </View>
-
-
-
-          {dares.map((dare) => (
-
-            <DareCard
-
-              key={dare.id}
-
-              dare={dare}
-
-              loading={takingDare === dare.id}
-
-              inProgress={inProgressDares.has(dare.id)}
-
-              likeCount={likeCounts[dare.id] ?? 0}
-
-              commentCount={commentCounts[dare.id] ?? 0}
-
-              likedByMe={likedDares.has(dare.id)}
-
-              onLike={() => handleLike(dare.id)}
-
-              onLikeCountPress={() => handleLikeCountPress(dare.id)}
-
-              onComment={() => handleComment(dare.id)}
-
-              onShare={() => handleShare(dare)}
-
-              isOwner={dare.creatorId === currentUserId}
-
-              onDelete={() => handleDelete(dare.id)}
-
-              onPress={() => {
-                void openDarePopup(dare);
-              }}
-
-              onPrimaryAction={() => {
-
-                handleTakeDare(dare.id);
-
-              }}
-
-              savedByMe={savedDares.has(dare.id)}
-
-onSave={() => handleSaveDare(dare.id)}
-
-
-
+        )}
+        ListHeaderComponent={
+          <>
+            <SectionHeader title="For You" />
+            {loading ? (
+              <View style={styles.centerState}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={styles.stateText}>Loading dares...</Text>
+              </View>
+            ) : error ? (
+              <View style={styles.centerState}>
+                <Text style={styles.errorText}>{error}</Text>
+                <Pressable
+                  onPress={() => { void loadDares(true); }}
+                  style={styles.retryButton}
+                >
+                  <Text style={styles.retryText}>Try Again</Text>
+                </Pressable>
+              </View>
+            ) : hasDares ? (
+              <View style={styles.featuredHeader}>
+                <Text style={styles.featuredLabel}>🔥 TODAY'S DARES</Text>
+                <Text style={styles.featuredSubtitle}>
+                  Pick a dare. Take the challenge.
+                </Text>
+              </View>
+            ) : null}
+          </>
+        }
+        ListEmptyComponent={
+          !loading && !error && !hasDares ? (
+            <EmptyState
+              title="No new dares yet"
+              description="Check back soon for fresh challenges, or explore Discover."
             />
-
-          ))}
-
-
-
-          <View style={styles.discoverSection}>
-
-            <Text style={styles.discoverTitle}>
-
-              Want to explore more?
-
-            </Text>
-
-
-
-            <Pressable
-
-              onPress={() =>
-
-                router.push('/(tabs)/discover')
-
-              }
-
-              style={styles.discoverButton}
-
-              accessibilityRole="button"
-
-              accessibilityLabel="Explore more dares"
-
-            >
-
-              <Text style={styles.discoverButtonText}>
-
-                Explore Discover
-
-              </Text>
-
-            </Pressable>
-
-          </View>
-
-        </View>
-
-      ) : (
-
-        <EmptyState
-
-          title="No new dares yet"
-
-          description="Check back soon for fresh challenges, or explore Discover."
-
-        />
-
-      )}
-
-
-
-
+          ) : null
+        }
+        ListFooterComponent={
+          <>
+            {loadingMore ? (
+              <View style={styles.loadMoreState}>
+                <ActivityIndicator size="small" color={colors.accent} />
+              </View>
+            ) : null}
+            {hasDares ? (
+            <View style={styles.discoverSection}>
+              <Text style={styles.discoverTitle}>Want to explore more?</Text>
+              <Pressable
+                onPress={() => router.push('/(tabs)/discover')}
+                style={styles.discoverButton}
+                accessibilityRole="button"
+                accessibilityLabel="Explore more dares"
+              >
+                <Text style={styles.discoverButtonText}>Explore Discover</Text>
+              </Pressable>
+            </View>
+            ) : null}
+          </>
+        }
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+            progressViewOffset={Platform.OS === 'android' ? 48 : 0}
+          />
+        }
+        onViewableItemsChanged={handleViewableItemsChanged}
+        viewabilityConfig={viewabilityConfig}
+        onScrollBeginDrag={handleScrollBeginDrag}
+        onMomentumScrollEnd={handleMomentumScrollEnd}
+        alwaysBounceVertical
+        scrollEventThrottle={16}
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.7}
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={3}
+        maxToRenderPerBatch={4}
+        windowSize={5}
+        removeClippedSubviews={Platform.OS === 'android'}
+        keyboardShouldPersistTaps="handled"
+      />
 
     </Screen>
 
@@ -2516,6 +2537,13 @@ onSave={() => handleSaveDare(dare.id)}
                   </View>
                 </View>
 
+                <View style={styles.darePopupCreatorRow}>
+                  <Text style={styles.darePopupInfoLabel}>CREATOR</Text>
+                  <Text style={styles.darePopupCreatorText}>
+                    {selectedCreatorName || 'DareShot User'}
+                  </Text>
+                </View>
+
                 <View style={styles.darePopupInfoCard}>
                   <View style={styles.darePopupInfoRow}>
                     <View style={styles.darePopupInfoItem}>
@@ -2547,6 +2575,71 @@ onSave={() => handleSaveDare(dare.id)}
                   {selectedDare.description?.trim() ||
                     'Take the challenge and complete the Dare using the required proof.'}
                 </Text>
+
+                <View style={styles.darePopupDetailsCard}>
+                  <Text style={styles.darePopupSectionTitle}>DARE DETAILS</Text>
+
+                  <View style={styles.darePopupDetailRow}>
+                    <Text style={styles.darePopupDetailLabel}>Participants</Text>
+                    <Text style={styles.darePopupDetailValue}>
+                      {selectedDare.maxParticipants !== null
+                        ? `${selectedDare.maxParticipants} max`
+                        : selectedParticipantCount !== null
+                          ? `${selectedParticipantCount} joined`
+                          : 'Not specified'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.darePopupDetailRow}>
+                    <Text style={styles.darePopupDetailLabel}>Participation duration</Text>
+                    <Text style={styles.darePopupDetailValue}>
+                      {selectedDare.participationDurationMinutes !== null
+                        ? `${selectedDare.participationDurationMinutes} min`
+                        : 'Not specified'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.darePopupDetailRow}>
+                    <Text style={styles.darePopupDetailLabel}>Voting</Text>
+                    <Text style={styles.darePopupDetailValue}>
+                      {selectedDare.votingEnabled ? 'Enabled' : 'Disabled'}
+                    </Text>
+                  </View>
+
+                  {selectedDare.requiredVotes !== null ? (
+                    <View style={styles.darePopupDetailRow}>
+                      <Text style={styles.darePopupDetailLabel}>Votes needed</Text>
+                      <Text style={styles.darePopupDetailValue}>
+                        {selectedDare.requiredVotes}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {selectedDare.votingDurationMinutes !== null ? (
+                    <View style={styles.darePopupDetailRow}>
+                      <Text style={styles.darePopupDetailLabel}>Voting duration</Text>
+                      <Text style={styles.darePopupDetailValue}>
+                        {selectedDare.votingDurationMinutes} min
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.darePopupDetailRow}>
+                    <Text style={styles.darePopupDetailLabel}>Status</Text>
+                    <Text style={styles.darePopupDetailValue}>
+                      {selectedDare.status}
+                    </Text>
+                  </View>
+                </View>
+
+                {selectedDare.rules?.trim() ? (
+                  <View style={styles.darePopupRulesCard}>
+                    <Text style={styles.darePopupSectionTitle}>RULES</Text>
+                    <Text style={styles.darePopupDescription}>
+                      {selectedDare.rules}
+                    </Text>
+                  </View>
+                ) : null}
 
                 {selectedDare.votingEnabled ? (
                   <View style={styles.darePopupVotingNote}>
@@ -3507,276 +3600,182 @@ onSave={() => handleSaveDare(dare.id)}
 
 
 function DareCommentItem({
-
   comment,
-
   allComments,
-
   onLike,
-
   onReply,
-
   depth = 0,
-
 }: {
-
   comment: DareComment;
-
   allComments: DareComment[];
-
   onLike: (commentId: string) => void | Promise<void>;
-
   onReply: (comment: DareComment) => void;
-
   depth?: number;
-
 }) {
-
   const replies = allComments.filter(
-
     (item) => item.parentCommentId === comment.id,
-
   );
+  const [showAllReplies, setShowAllReplies] = useState(false);
+  const visibleReplies = showAllReplies ? replies : replies.slice(0, 1);
+  const hiddenReplyCount = Math.max(replies.length - visibleReplies.length, 0);
 
-
+  const openProfile = () => {
+    router.push({
+      pathname: '/public-profile',
+      params: {
+        userId: comment.userId,
+      },
+    });
+  };
 
   return (
-
-    <View
-
-      style={[
-
-        styles.commentBlock,
-
-        depth > 0 && styles.nestedCommentBlock,
-
-      ]}
-
-    >
-
+    <View style={styles.commentBlock}>
       <View style={styles.commentRow}>
-
-      <View
-
-  style={[
-
-    styles.commentAvatar,
-
-    depth > 0 && styles.replyAvatar,
-
-  ]}
-
->
-
-  {comment.avatarUrl ? (
-
-    <Image
-
-      source={{ uri: comment.avatarUrl }}
-
-      style={[
-
-        styles.commentAvatarImage,
-
-        depth > 0 && styles.replyAvatarImage,
-
-      ]}
-
-    />
-
-  ) : (
-
-    <Text
-
-      style={[
-
-        styles.commentAvatarText,
-
-        depth > 0 && styles.replyAvatarText,
-
-      ]}
-
-    >
-
-      {comment.displayName.charAt(0).toUpperCase()}
-
-    </Text>
-
-  )}
-
-</View>
-
-
+        <Pressable
+          onPress={openProfile}
+          style={[
+            styles.commentAvatar,
+            depth > 0 && styles.replyAvatar,
+          ]}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${comment.displayName}'s profile`}
+          hitSlop={6}
+        >
+          {comment.avatarUrl ? (
+            <Image
+              source={{ uri: comment.avatarUrl }}
+              style={[
+                styles.commentAvatarImage,
+                depth > 0 && styles.replyAvatarImage,
+              ]}
+            />
+          ) : (
+            <Text
+              style={[
+                styles.commentAvatarText,
+                depth > 0 && styles.replyAvatarText,
+              ]}
+            >
+              {comment.displayName.charAt(0).toUpperCase()}
+            </Text>
+          )}
+        </Pressable>
 
         <View style={styles.commentBody}>
-
           <Text style={styles.commentUserName}>
-
             {comment.displayName}
-
           </Text>
-
-
 
           {comment.username ? (
-
             <Text style={styles.commentUsername}>
-
               @{comment.username}
-
             </Text>
-
           ) : null}
 
-
-
           <Text style={styles.commentContent}>
-
             {comment.content}
-
           </Text>
 
-
-
           <View style={styles.commentMetaRow}>
-
             <Pressable
-
               onPress={() => onLike(comment.id)}
-
               style={styles.commentMetaButton}
-
               hitSlop={6}
-
             >
-
               <Ionicons
-
                 name={comment.likedByMe ? 'heart' : 'heart-outline'}
-
                 size={17}
-
                 color={
-
                   comment.likedByMe
-
                     ? '#FF4D67'
-
                     : colors.secondaryText
-
                 }
-
               />
-
-
 
               {comment.likeCount > 0 ? (
-
                 <Text
-
                   style={[
-
                     styles.commentMetaText,
-
                     comment.likedByMe && styles.commentLikedText,
-
                   ]}
-
                 >
-
                   {comment.likeCount}
-
                 </Text>
-
               ) : null}
-
             </Pressable>
-
-
 
             <Pressable
-
               onPress={() => onReply(comment)}
-
               style={styles.commentMetaButton}
-
               hitSlop={6}
-
             >
-
               <Ionicons
-
                 name="return-down-forward-outline"
-
                 size={17}
-
                 color={colors.secondaryText}
-
               />
 
-
-
               <Text style={styles.commentMetaText}>
-
                 Reply
-
               </Text>
-
             </Pressable>
-
           </View>
-
         </View>
-
       </View>
 
-
-
       {replies.length > 0 ? (
-
         <View
-
           style={[
-
             styles.repliesContainer,
-
-            depth > 0 && styles.nestedRepliesContainer,
-
+            depth > 0 && styles.flatNestedRepliesContainer,
           ]}
-
         >
-
-          {replies.map((reply) => (
-
+          {visibleReplies.map((reply) => (
             <DareCommentItem
-
               key={reply.id}
-
               comment={reply}
-
               allComments={allComments}
-
               onLike={onLike}
-
               onReply={onReply}
-
               depth={depth + 1}
-
             />
-
           ))}
 
+          {hiddenReplyCount > 0 ? (
+            <Pressable
+              onPress={() => setShowAllReplies(true)}
+              style={styles.viewMoreRepliesButton}
+              hitSlop={6}
+              accessibilityRole="button"
+              accessibilityLabel={`View ${hiddenReplyCount} more ${hiddenReplyCount === 1 ? 'reply' : 'replies'}`}
+            >
+              <View style={styles.viewMoreRepliesLine} />
+              <Text style={styles.viewMoreRepliesText}>
+                View {hiddenReplyCount} more {hiddenReplyCount === 1 ? 'reply' : 'replies'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
-
       ) : null}
-
     </View>
-
   );
-
 }
 
-
+function formatRelativeTime(value: string): string {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 5) return `${weeks}w ago`;
+  return new Date(value).toLocaleDateString();
+}
 
 const styles = StyleSheet.create({
 
@@ -3890,6 +3889,15 @@ menuLine: {
 
 },
 
+  homeScroll: {
+    flex: 1,
+  },
+
+  homeScrollContent: {
+    flexGrow: 1,
+    paddingBottom: spacing.xl,
+  },
+
   feed: {
 
     paddingBottom: spacing.xl,
@@ -3897,6 +3905,41 @@ menuLine: {
   },
 
 
+
+  dareArenaItem: {
+    paddingHorizontal: 0,
+  },
+
+  dareArenaDescription: {
+    marginTop: -spacing.md,
+    marginBottom: spacing.lg,
+    paddingHorizontal: spacing.lg,
+  },
+
+  dareArenaDescriptionText: {
+    color: colors.primaryText,
+    fontSize: fontSize.sm,
+    lineHeight: 20,
+  },
+
+  dareArenaViewMoreButton: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
+  },
+
+  dareArenaViewMoreText: {
+    color: colors.accent,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+
+  dareArenaTimestamp: {
+    color: colors.secondaryText,
+    fontSize: 11,
+    marginTop: spacing.xs,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
 
   featuredHeader: {
 
@@ -4003,6 +4046,12 @@ menuLine: {
   },
 
 
+
+  loadMoreState: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   discoverSection: {
 
@@ -4165,6 +4214,54 @@ menuLine: {
 
   darePopupDifficultyText: {
     color: colors.danger,
+  },
+
+  darePopupCreatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+
+  darePopupCreatorText: {
+    color: colors.primaryText,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    maxWidth: '65%',
+    textAlign: 'right',
+  },
+
+  darePopupDetailsCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+
+  darePopupDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.xs,
+  },
+
+  darePopupDetailLabel: {
+    flex: 1,
+    color: colors.secondaryText,
+    fontSize: fontSize.xs,
+  },
+
+  darePopupDetailValue: {
+    color: colors.primaryText,
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+
+  darePopupRulesCard: {
+    marginBottom: spacing.md,
   },
 
   darePopupInfoCard: {
@@ -4634,14 +4731,35 @@ replyAvatarImage: {
 
 
   nestedRepliesContainer: {
-
     marginLeft: 36,
-
     paddingLeft: spacing.sm,
-
   },
 
+  flatNestedRepliesContainer: {
+    marginLeft: 0,
+    paddingLeft: 0,
+    borderLeftWidth: 0,
+  },
 
+  viewMoreRepliesButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xs,
+    paddingVertical: 4,
+  },
+
+  viewMoreRepliesLine: {
+    width: 28,
+    height: 1,
+    backgroundColor: colors.border,
+    marginRight: spacing.sm,
+  },
+
+  viewMoreRepliesText: {
+    color: colors.secondaryText,
+    fontSize: 12,
+    fontWeight: '600',
+  },
 
   shareSheet: {
 
