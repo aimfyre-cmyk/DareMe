@@ -23,3 +23,10 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/r2-media-url/deno.json"
 entrypoint = "./functions/r2-media-url/index.ts"
+
+[functions.private-shot-proof-url]
+enabled = true
+# Auth is enforced inside the function via withSupabase({ auth: "user" }).
+verify_jwt = false
+import_map = "./functions/private-shot-proof-url/deno.json"
+entrypoint = "./functions/private-shot-proof-url/index.ts"

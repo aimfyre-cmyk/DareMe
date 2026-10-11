@@ -583,8 +583,15 @@ const shotOptions: Array<{
 
 
 
-function ProofVideo({ uri }: { uri: string }) {
-  const player = useVideoPlayer(uri, (instance) => {
+function ProofVideo({
+  uri,
+  contentType,
+}: {
+  uri: string;
+  contentType: 'hls' | 'progressive';
+}) {
+  // Cloudflare Stream proofs are HLS; iOS can't cache HLS sources.
+  const player = useVideoPlayer({ uri, contentType, useCaching: false }, (instance) => {
     instance.loop = false;
   });
 
@@ -882,6 +889,10 @@ export default function PrivateShotScreen({
   const [shotProof, setShotProof] = useState<ShotResponse | null>(null);
   const [shotProofUrl, setShotProofUrl] = useState<string | null>(null);
   const [shotProofLoading, setShotProofLoading] = useState(false);
+  const [shotProofContentType, setShotProofContentType] =
+    useState<'hls' | 'progressive'>('progressive');
+  // The shot whose proof is being loaded; older in-flight loads are ignored.
+  const activeProofShotIdRef = useRef<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -1055,6 +1066,7 @@ export default function PrivateShotScreen({
     if (shot?.status === 'completed') {
       void loadShotProof(shot.id);
     } else {
+      activeProofShotIdRef.current = null;
       setShotProof(null);
       setShotProofUrl(null);
     }
@@ -1785,6 +1797,9 @@ export default function PrivateShotScreen({
   };
 
   const loadShotProof = async (shotId: string) => {
+    activeProofShotIdRef.current = shotId;
+    const isCurrent = () => activeProofShotIdRef.current === shotId;
+
     try {
       setShotProofLoading(true);
       setShotProof(null);
@@ -1798,38 +1813,40 @@ export default function PrivateShotScreen({
       if (responseError) throw responseError;
 
       const response = responseData as ShotResponse | null;
-      if (!response?.media_key) return;
+      if (!response?.media_key || !isCurrent()) return;
 
       setShotProof(response);
 
-      const contentType =
-        response.media_type === 'video'
-          ? 'video/mp4'
-          : 'audio/mp4';
-
+      // The server re-checks access for this shot and turns the stored media
+      // key (Cloudflare Stream UID or R2 key) into a playable URL.
       const { data: urlData, error: urlError } =
-        await supabase.functions.invoke('r2-download-url', {
-          body: {
-            key: response.media_key,
-            contentType,
-          },
+        await supabase.functions.invoke('private-shot-proof-url', {
+          body: { shotId },
         });
 
-      if (urlError) throw urlError;
+      if (urlError) throw await toFunctionError(urlError);
+      if (!isCurrent()) return;
 
-      const signedUrl =
-        (urlData as { success?: boolean; downloadUrl?: string } | null)
-          ?.downloadUrl;
+      const proof = urlData as {
+        status?: 'ready' | 'processing';
+        playback?: { url?: string; contentType?: 'hls' | 'progressive' };
+      } | null;
 
-      if (!signedUrl) {
-        throw new Error('Proof download URL was not returned.');
+      // Still encoding on Cloudflare Stream: the card shows "not available yet".
+      if (proof?.status === 'processing') return;
+
+      if (!proof?.playback?.url) {
+        throw new Error('Proof playback URL was not returned.');
       }
 
-      setShotProofUrl(signedUrl);
+      setShotProofContentType(
+        proof.playback.contentType === 'hls' ? 'hls' : 'progressive',
+      );
+      setShotProofUrl(proof.playback.url);
     } catch (err) {
       console.warn('[Private Shot] Proof load failed:', err);
     } finally {
-      setShotProofLoading(false);
+      if (isCurrent()) setShotProofLoading(false);
     }
   };
 
@@ -8418,7 +8435,7 @@ const requestRecordingPermissions = async (
                   </View>
                 ) : shotProofUrl && shotProof?.media_type === 'video' ? (
                   <View style={styles.proofMediaWrap}>
-                    <ProofVideo uri={shotProofUrl} />
+                    <ProofVideo uri={shotProofUrl} contentType={shotProofContentType} />
                   </View>
                 ) : shotProofUrl && shotProof?.media_type === 'voice' ? (
                   <ProofAudio uri={shotProofUrl} />
