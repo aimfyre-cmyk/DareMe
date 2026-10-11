@@ -158,6 +158,10 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           maxDurationSeconds: 120,
+          // Private shots must not be playable by UID alone. Playback goes
+          // through private-shot-proof-url, which checks the participant and
+          // mints a short-lived signed token.
+          requireSignedURLs: true,
           meta: {
             userId: user.id,
             fileName,

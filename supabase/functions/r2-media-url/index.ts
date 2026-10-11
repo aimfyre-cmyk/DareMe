@@ -62,6 +62,15 @@ export default {
           return errorResponse("Invalid R2 object key", 400);
         }
 
+        // Private shot proofs are only served through private-shot-proof-url,
+        // which checks that the caller is a participant of the shot.
+        if (key.startsWith("private-shots/")) {
+          return errorResponse(
+            "Use private-shot-proof-url for this media",
+            403,
+          );
+        }
+
         const accessKey = Deno.env.get("R2_ACCESS_KEY_ID");
         const secretKey = Deno.env.get("R2_SECRET_ACCESS_KEY");
         const endpoint = Deno.env.get("R2_ENDPOINT");
