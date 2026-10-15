@@ -23,3 +23,17 @@ enabled = true
 verify_jwt = false
 import_map = "./functions/r2-media-url/deno.json"
 entrypoint = "./functions/r2-media-url/index.ts"
+
+[functions.private-shot-proof-url]
+enabled = true
+# Auth is enforced inside the function via withSupabase({ auth: "user" }).
+verify_jwt = false
+import_map = "./functions/private-shot-proof-url/deno.json"
+entrypoint = "./functions/private-shot-proof-url/index.ts"
+
+[functions.cloudflare-stream-upload-url]
+enabled = true
+# Live with gateway JWT verification on; the function also calls auth.getUser().
+# Deploy by name WITHOUT --no-verify-jwt.
+verify_jwt = true
+entrypoint = "./functions/cloudflare-stream-upload-url/index.ts"

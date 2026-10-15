@@ -1,4 +1,4 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.117.3';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -158,6 +158,10 @@ Deno.serve(async (req) => {
         },
         body: JSON.stringify({
           maxDurationSeconds: 120,
+          // Private shots must not be playable by UID alone. Playback goes
+          // through private-shot-proof-url, which checks the participant and
+          // mints a short-lived signed token.
+          requireSignedURLs: true,
           meta: {
             userId: user.id,
             fileName,

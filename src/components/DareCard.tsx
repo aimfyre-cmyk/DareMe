@@ -6,7 +6,7 @@ import { useSegments } from 'expo-router';
 
 import { useEffect, useState } from 'react';
 
-import { prefetchFeedImage, resolveFeedMediaUrl } from '../features/onboarding/media/feedMediaEngine';
+import { peekFeedMediaUrl, prefetchFeedImage, resolveFeedMediaUrl } from '../features/onboarding/media/feedMediaEngine';
 
 import {
   type LayoutChangeEvent,
@@ -201,9 +201,21 @@ export function DareCard({
 
   };
 
+  // Start from a cached signed URL (or a remote URL), never the raw R2 key:
+
+  // a key is not a loadable URL and fails until the effect below resolves it.
+
   const [resolvedMediaUrl, setResolvedMediaUrl] =
 
-    useState<string | null>(dare.mediaUrl ?? null);
+    useState<string | null>(() => peekFeedMediaUrl(dare.mediaUrl));
+
+  // True while a stored R2 key is still being exchanged for a signed URL.
+
+  const [isMediaPending, setIsMediaPending] = useState(
+
+    () => !!dare.mediaUrl?.trim() && !peekFeedMediaUrl(dare.mediaUrl),
+
+  );
 
   // Video audio starts muted. This state only controls the transparent
 
@@ -221,15 +233,37 @@ export function DareCard({
 
       if (!raw) {
 
-        if (!cancelled) setResolvedMediaUrl(null);
+        if (!cancelled) {
+
+          setResolvedMediaUrl(null);
+
+          setIsMediaPending(false);
+
+        }
 
         return;
 
       }
 
+      const cached = peekFeedMediaUrl(raw);
+
+      if (!cancelled) {
+
+        setResolvedMediaUrl(cached);
+
+        setIsMediaPending(!cached);
+
+      }
+
       const resolved = await resolveFeedMediaUrl(raw);
 
-      if (!cancelled) setResolvedMediaUrl(resolved);
+      if (!cancelled) {
+
+        setResolvedMediaUrl(resolved);
+
+        setIsMediaPending(false);
+
+      }
 
       if (dare.mediaType === 'image' && resolved) {
 
@@ -492,6 +526,14 @@ export function DareCard({
             </Pressable>
 
           </>
+
+        ) : isMediaPending ? (
+
+          // Plain surface while the signed URL loads, so the stock cover
+
+          // doesn't flash before the real media.
+
+          <View style={[styles.coverMedia, styles.coverPending]} />
 
         ) : (
 
@@ -974,6 +1016,12 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
 
     alignSelf: 'stretch',
+
+  },
+
+  coverPending: {
+
+    backgroundColor: colors.surfaceElevated,
 
   },
 

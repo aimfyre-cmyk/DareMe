@@ -27,7 +27,10 @@ type MediaKind = keyof typeof MAX_UPLOAD_BYTES;
 type UploadFolder =
   | "posts"
   | "avatars"
-  | "dares";
+  | "dares"
+  // Private shot proofs. Only private-shot-proof-url (participant check)
+  // signs reads for this prefix; r2-media-url refuses it.
+  | "private-shots";
 
 // Allowed content types, their size class, and the extension used when
 // the client's file name does not carry a known extension.
@@ -52,6 +55,9 @@ const ALLOWED_TYPES: Record<string, { kind: MediaKind; extension: string }> = {
   "audio/x-m4a": { kind: "audio", extension: "m4a" },
   "audio/wav": { kind: "audio", extension: "wav" },
   "audio/x-wav": { kind: "audio", extension: "wav" },
+  // iOS reports .wav as audio/vnd.wave (UTType preferredMIMEType).
+  "audio/vnd.wave": { kind: "audio", extension: "wav" },
+  "audio/wave": { kind: "audio", extension: "wav" },
   "audio/ogg": { kind: "audio", extension: "ogg" },
 };
 
@@ -108,7 +114,8 @@ function resolveFolder(
   if (
     requestedFolder === "posts" ||
     requestedFolder === "avatars" ||
-    requestedFolder === "dares"
+    requestedFolder === "dares" ||
+    requestedFolder === "private-shots"
   ) {
     return requestedFolder;
   }

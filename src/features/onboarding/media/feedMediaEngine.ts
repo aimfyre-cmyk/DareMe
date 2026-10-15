@@ -28,6 +28,22 @@ export function isRemoteMediaUrl(value: string | null | undefined): boolean {
 }
 
 /**
+ * Synchronous lookup: a remote URL as-is, or a still-valid cached signed URL.
+ * Never returns a raw R2 key, so callers can use it as an initial source.
+ */
+export function peekFeedMediaUrl(
+  rawValue: string | null | undefined,
+): string | null {
+  const raw = rawValue?.trim() ?? '';
+  if (!raw) return null;
+
+  if (isRemoteMediaUrl(raw)) return raw;
+
+  const cached = signedUrlCache.get(raw);
+  return cached && cached.expiresAt > Date.now() ? cached.url : null;
+}
+
+/**
  * Resolve an R2 object key once and reuse the signed URL for the feed cache
  * lifetime. This keeps Home/Discover from repeatedly invoking the Edge
  * Function while scrolling back through already-seen media.

@@ -33,6 +33,9 @@ function isValidObjectKey(key: string) {
     !key.startsWith("http://") &&
     !key.startsWith("https://") &&
     !key.includes("..") &&
+    // No "." or empty segments, so "./private-shots/x" can't dodge the
+    // private prefix check below.
+    !key.split("/").some((segment) => segment === "" || segment === ".") &&
     // deno-lint-ignore no-control-regex
     !/[\u0000-\u001f\u007f]/.test(key);
 }
@@ -60,6 +63,15 @@ export default {
 
         if (!isValidObjectKey(key)) {
           return errorResponse("Invalid R2 object key", 400);
+        }
+
+        // Private shot proofs are only served through private-shot-proof-url,
+        // which checks that the caller is a participant of the shot.
+        if (key.startsWith("private-shots/")) {
+          return errorResponse(
+            "Use private-shot-proof-url for this media",
+            403,
+          );
         }
 
         const accessKey = Deno.env.get("R2_ACCESS_KEY_ID");
